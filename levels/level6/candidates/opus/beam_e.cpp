@@ -87,7 +87,7 @@ void build() {
 
 double WH = 3.0, W1 = 1.0, W2 = 0.3, WL = 0.0, WTM = 0.0, WTS = 0.0;
 int TAILN = 40;
-int DBG = 0, HALOT = 0, HFORBID = 0;
+int DBG = 0, HALOT = 0, HFORBID = 0, TAILV = 1;
 double WX1 = 0, WX2 = 0;
 vector<string> forced;
 vector<string> prefixLines, prefixOut;  // compact ("FB-T--") and printable forms  // per tick: 6 chars, '?' = free, else the forced instruction
@@ -130,6 +130,10 @@ template <int NW> struct Solver {
                     if (G.fires[e * RING + (p + d + RING) % RING]) ok = true;
                 allowed[e * RING + p] = ok;
             }
+        cleanLine.assign(6 * RING, 1);
+        for (int k = 0; k < 6 * RING; k++)
+            for (int c : G.lineCells[k])
+                if (c >= NP) cleanLine[k] = 0;
         cov.assign(6 * NP, -1);
         for (int e = 0; e < 6; e++)
             for (int q = 0; q < RING; q++)
@@ -163,6 +167,7 @@ template <int NW> struct Solver {
 
     // lineDist[e][pos][act]: rail moves (+1 if a toggle is needed) to the nearest line that holds a
     // missing pattern cell, recomputed per parent (its missing set approximates the child's).
+    vector<char> cleanLine;
     vector<int> cov;  // [e*NP+x] ring position of emitter e covering pattern cell x (-1 none)
     vector<int> lineDist;
     void computeLineDist(const B& miss) {
@@ -240,6 +245,22 @@ template <int NW> struct Solver {
                     int x = k * 64 + __builtin_ctzll(w);
                     w &= w - 1;
                     int a1 = 99, a2 = 99;
+                    if (TAILV == 2) {
+                        // min over usable emitter pairs of the later arrival; a same-axis pair paints the whole
+                        // chord, usable only when that chord holds no halo cell
+                        int dd[6];
+                        for (int e = 0; e < 6; e++) {
+                            int q = cov[e * NP + x];
+                            dd[e] = q < 0 ? 99 : ringdist(n.pos[e], q) + (((n.act >> e) & 1) ? 0 : 1);
+                        }
+                        for (int e = 0; e < 6; e++)
+                            for (int f = e + 1; f < 6; f++) {
+                                if (dd[e] >= 99 || dd[f] >= 99) continue;
+                                if (f == e + 3 && !cleanLine[e * RING + cov[e * NP + x]]) continue;
+                                int v = max(dd[e], dd[f]);
+                                if (v < a2) a2 = v;
+                            }
+                    } else
                     for (int e = 0; e < 6; e++) {
                         int q = cov[e * NP + x];
                         if (q < 0) continue;
@@ -541,6 +562,7 @@ int main(int argc, char** argv) {
     if (getenv("WX1")) WX1 = atof(getenv("WX1"));
     if (getenv("WX2")) WX2 = atof(getenv("WX2"));
     if (getenv("HFORBID")) HFORBID = atoi(getenv("HFORBID"));
+    if (getenv("TAILV")) TAILV = atoi(getenv("TAILV"));
     if (getenv("DBG")) DBG = atoi(getenv("DBG"));
     if (getenv("TAILN")) TAILN = atoi(getenv("TAILN"));
     if (argc > 10) {

@@ -11,16 +11,26 @@ from l2sim import Model
 WAIT = '- - - - - -'
 
 
-def bounce(md, cfgs, prog, count, hi, lo, M0, ndone, maxlen, waitmode):
+def bounce(md, cfgs, prog, count, hi, lo, M0, ndone, maxlen, waitmode, waitturn=0):
     """prog[:hi+1] already simulated: matter M0 after tick hi, ndone submissions. Walk from index hi."""
     out = list(prog[:hi + 1])
     M = M0
     cur = hi
     d = -1
     stuck = 0
+    pend = waitturn
     while ndone < count:
         if len(out) >= maxlen:
             return None
+        if pend:
+            pend = 0
+            out.append(WAIT)
+            M, s = md.step(M, cfgs[cur])
+            if s:
+                ndone += 1
+                d = -d
+                pend = waitturn
+            continue
         nxt = cur + d
         if nxt < lo or nxt > hi:
             # window end without submission: wait (repeat config) once, then turn
@@ -46,6 +56,7 @@ def bounce(md, cfgs, prog, count, hi, lo, M0, ndone, maxlen, waitmode):
             ndone += 1
             d = -d
             stuck = 0
+            pend = waitturn
     return out
 
 
@@ -85,8 +96,9 @@ def main():
             M0, nd0 = Ms[hi]
             for lo in range(0, hi):
                 for wm in (0, 1):
+                  for wt in (0, 1):
                     lim = len(bestc) if bestc else len(prog)
-                    c = bounce(md, cfgs, prog, count, hi, lo, M0, nd0, lim, wm)
+                    c = bounce(md, cfgs, prog, count, hi, lo, M0, nd0, lim, wm, wt)
                     if c and (bestc is None or len(c) < len(bestc)):
                         bestc = c
         if bestc and len(bestc) < len(prog) and valid(r, pat, count, bestc):

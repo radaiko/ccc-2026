@@ -82,3 +82,7 @@
 - [medium agent] 28: free (K,m) scan found K=13 m=3 then K=8 m=2 (two 4-tick copies; periodic 4 is UNSAT) ->
   57 -> 50; 11/3 and 7/2 UNSAT. Seg re-solve pass over the 41 gap patterns saved 10 more (203, 186, 107 -1).
   Medium 5820.
+- [medium-cycles agent] Fixed-anchor SAT (`opus/satanchor.py`, satcyc.Model with the cycle's last config pinned to a
+  submission config of the best program, sym off): UNSAT/SAT in ~20 s where free-anchor SAT is 'unknown' after
+  120 s (167, K=13 m=2). `satauto.py` drives it (K = ceil(rate*m)-1 down): 50 115->107 (m=2 K=11), 197 67->65,
+  132 51->50; anchors of 167 proven to have no (13,2) / (6,1) cycle.
