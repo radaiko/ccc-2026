@@ -12,8 +12,9 @@ from harness import HERE, LEVEL, cases, load_best, save_best, valid, run_job
 from levels.level6.candidates.astra import board, ring, DIRS, NB
 
 
-def sim(r, pat, prog):
-    """Return list of (tick, pos tuple, actmask) at each submission (tick = number of lines executed)."""
+def sim(r, pat, prog, start=None):
+    """Return list of (tick, pos tuple, actmask) at each submission (tick = number of lines executed).
+    start = (pos tuple, actmask) to begin at that configuration with empty matter (default: initial state)."""
     g = board(r)
     h, w = 2 * r + 1, 4 * r + 1
     rg = ring(r)
@@ -24,6 +25,9 @@ def sim(r, pat, prog):
             if (y + dy, x + dx) not in ps and 0 <= y + dy < h and 0 <= x + dx < w and g[y + dy][x + dx] in 'OM'}
     pos = [0, r, 2 * r, 3 * r, 4 * r, 5 * r]
     act = [False] * 6
+    if start is not None:
+        pos = list(start[0])
+        act = [bool(start[1] >> e & 1) for e in range(6)]
     subs = []
     for t, line in enumerate(prog):
         if isinstance(line, str):
@@ -195,3 +199,28 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+def runin_variants(inp, i, r, pat, count, anchor, cyc, width, seed, K, weights, ncs=(1,)):
+    """Run-ins from the initial state that submit nc copies exactly at a phase configuration of the cycle,
+    followed by the rotated cycle. Returns the shortest assembled program (or None)."""
+    phases = sim(r, pat, cyc, start=anchor)
+    init = (tuple(e * r for e in range(6)), 0)
+    targets = []
+    for tau, pos, am in phases:
+        if (pos, am) not in [t[1] for t in targets]:
+            targets.append((tau, (pos, am)))
+    best = None
+    for nc in ncs:
+        if nc >= count:
+            continue
+        pairs = [(init[0], init[1], c[0], c[1]) for _, c in targets]
+        pid, path = run_retbeam(inp, i, width, seed, K, nc, pairs, weights)
+        if pid is None:
+            continue
+        tau = targets[pid][0]
+        rot = cyc[tau:] + cyc[:tau]
+        cand = assemble(r, pat, count, path, rot)
+        if cand and (best is None or len(cand) < len(best)):
+            best = cand
+    return best

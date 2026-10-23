@@ -40,3 +40,10 @@
   halo effectively forbidden) full pass at width 300: enormous 5371 -> 5039.
 - [enormous agent] Count-2 patterns: copy 2 = copy-1 emitter configurations replayed backwards (F<->B, T<->T,
   candidates/opus/rev_e.py) is often valid and drops copy 1's leading travel ticks: -38 then -4 lines on enormous.
+- Goal raised to < 15,000 total (at 16,326: medium 5959, large 5218, enormous 5039). Planned split: medium ~5550,
+  large ~4770, enormous ~4550.
+- [medium-cycles agent] `opus/retbeam.cpp` + `retauto.py`: return-constrained beam from (anchor config, empty matter)
+  that must submit NC copies with the last one exactly at the anchor (hard prune: ring distance + toggle to anchor
+  <= ticks left). Anchors = submission configs of the current best. NC=1 cycles (K<=current per copy) are almost
+  never found; NC=2/3 multi-copy cycles are: 167 156->126 (2 copies / 14 ticks), 197 75->71, 49 90->85, 132 64->63.
+  Medium 5991 -> 5951. Use WH=100 (halo weight) in the beam weights.

@@ -9,7 +9,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 
 from harness import LEVEL, cases, load_best, save_best, valid
-from retcyc import sim, assemble, run_retbeam, run_free
+from retcyc import sim, assemble, run_retbeam, run_free, runin_variants
 
 
 def main():
@@ -30,6 +30,7 @@ def main():
     freeK = int(opt('--free', '0'))
     freeW = int(opt('--freew', '2000'))
     minper = float(opt('--minper', '2'))
+    runinK = int(opt('--runin', '0'))
     name, width = args[0], int(args[1])
     inp = LEVEL / 'data' / ('in_level-6_%s.txt' % name)
     cs = list(cases(inp.read_text()))
@@ -74,6 +75,12 @@ def main():
                     cand = assemble(r, pat, count, pre, cyc)
                     if cand and (bestp is None or len(cand) < len(bestp)):
                         bestp = cand
+                if runinK:
+                    alt = runin_variants(inp, i, r, pat, count, keys[pid], cyc, width, seed,
+                                         subs[0][0] + runinK, weights, ncs=(1, 2))
+                    if alt and (bestp is None or len(alt) < len(bestp)):
+                        log.append('runin%d' % len(alt))
+                        bestp = alt
                 log.append('nc%d K%d:cyc%d->%s' % (nc, K, len(cyc), len(bestp) if bestp else 'x'))
                 if bestp and len(bestp) < len(prog) and valid(r, pat, count, bestp):
                     print('pattern %d: %d -> %d (nc %d cycle %d)' % (i, len(prog), len(bestp), nc, len(cyc)),
