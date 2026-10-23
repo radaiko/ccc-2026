@@ -86,3 +86,4 @@
   submission config of the best program, sym off): UNSAT/SAT in ~20 s where free-anchor SAT is 'unknown' after
   120 s (167, K=13 m=2). `satauto.py` drives it (K = ceil(rate*m)-1 down): 50 115->107 (m=2 K=11), 197 67->65,
   132 51->50; anchors of 167 proven to have no (13,2) / (6,1) cycle.
+- [large agent 2] l2_bounce.py: after the k-th submission walk the program's own config path BACK and forth inside a window (moves are reversible), turning at every submission, optionally repeating the turning config once (a reversed copy needs the cells of the submission config again). Per copy = the cheapest copy segment of the program. Cheap (1 s for all of large): 143 153->145, 54 70->65, 184 78->74, large -34 together.
