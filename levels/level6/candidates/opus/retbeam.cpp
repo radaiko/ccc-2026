@@ -87,7 +87,7 @@ void build() {
 }
 
 double WH = 3.0, W1 = 1.0, W2 = 0.3, WL = 0.5, WR = 1.0;
-int K = 6, NC = 1, PERPID = 0, FREE = 0, GOAL = 0;
+int K = 6, NC = 1, PERPID = 0, FREE = 0, GOAL = 0, ALL = 0;
 struct Pair {
     unsigned char spos[6], sact, tpos[6], tact;
 };
@@ -160,6 +160,22 @@ template <int NW> struct Solver {
     mt19937_64 rng;
     struct Rec { int depth, pi; unsigned short ins; int pid; };
     map<u64, Rec> anchors;
+    map<int, Rec> goals;
+    void printGoals() {
+        for (auto& kv : goals) {
+            Rec& r = kv.second;
+            vector<string> prog;
+            prog.push_back(insStr(r.ins));
+            int idx = r.pi;
+            for (int d = r.depth - 1; d > 0; d--) {
+                prog.push_back(insStr(levels[d][idx].ins));
+                idx = levels[d][idx].parent;
+            }
+            reverse(prog.begin(), prog.end());
+            printf("CYCLE %d %d\n", r.pid, r.depth);
+            for (auto& l : prog) puts(l.c_str());
+        }
+    }
     void printAnchors() {
         vector<pair<int, u64>> order;
         for (auto& kv : anchors) order.push_back({kv.second.depth, kv.first});
@@ -386,8 +402,13 @@ template <int NW> struct Solver {
                                 return;
                             }
                             if (retSum == 0) {
-                                found = pi;
-                                foundIns = ins;
+                                if (ALL) {
+                                    if (!goals.count(par.pid) && (int)goals.size() < ALL)
+                                        goals[par.pid] = {depth + 1, pi, ins, par.pid};
+                                } else {
+                                    found = pi;
+                                    foundIns = ins;
+                                }
                             }
                             return;  // last copy must be at the target
                         }
@@ -444,6 +465,7 @@ template <int NW> struct Solver {
             levels.push_back(std::move(next));
         }
         if (FREE) printAnchors();
+        if (ALL) printGoals();
         return {};
     }
     static string insStr(unsigned short ins) {
@@ -535,6 +557,7 @@ int main(int argc, char** argv) {
     if (getenv("PERPID")) PERPID = atoi(getenv("PERPID"));
     if (getenv("FREE")) FREE = atoi(getenv("FREE"));
     if (getenv("GOAL")) GOAL = atoi(getenv("GOAL"));
+    if (getenv("ALL")) ALL = atoi(getenv("ALL"));
     int n;
     in >> n;
     for (int t = 0; t <= idx; t++) {
