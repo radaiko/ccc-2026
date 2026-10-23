@@ -13,16 +13,18 @@ def offs(r, e, p):
     return (p - e * r + 3 * r) % (6 * r) - 3 * r
 
 
-def anchored(r, pat, K, m, anchor, tmo, rad=0, freeact=False, want_cfg=False):
+def anchored(r, pat, K, m, anchor, tmo, rad=0, freeact=False, want_cfg=False, freeE=()):
     """rad > 0: the anchor may lie within +-rad rail steps per emitter (freeact: any on/off state)."""
     pos, am = anchor
     md = satcyc.Model(r, pat)
     md.sym = False
     off = [offs(r, e, pos[e]) for e in range(6)]
-    if any(abs(o) > r for o in off):
+    if any(abs(off[e]) > r for e in range(6) if e not in freeE):
         return 'skip'
     cs, Ss = satcyc.build_cycle(md, K, m)
     for e in range(6):
+        if e in freeE:
+            continue
         p, a = cs[-1][e]
         md.add([p[md.offs.index(o)] for o in range(off[e] - rad, off[e] + rad + 1) if -r <= o <= r])
         if not freeact:

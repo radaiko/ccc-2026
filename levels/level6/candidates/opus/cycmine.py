@@ -63,6 +63,7 @@ def main():
     tmo = int(opt('--tmo', '30000'))
     freeK = int(opt('--freeK', '3'))
     freeW = int(opt('--freew', '3000'))
+    maxfree = int(opt('--maxfree', '3000'))
     seed = opt('--seed', '1')
     weights = opt('--w', '100,1,0.3,0.5,1').split(',')
     name, sel = args[0], args[1]
@@ -81,7 +82,8 @@ def main():
             anchors.setdefault((pos, am), []).append((prog[:t], j + 1))
         if freeK:
             starts = list(anchors.keys())
-            for pid, pos, am, path in run_free(inp, i, freeW, seed, math.ceil(rate) + freeK, starts, weights):
+            for pid, pos, am, path in run_free(inp, i, freeW, seed, math.ceil(rate) + freeK, starts,
+                                               weights)[:maxfree]:
                 if (pos, am) in anchors:
                     continue
                 src = min(anchors[starts[pid]], key=lambda x: len(x[0]) - rate * x[1])

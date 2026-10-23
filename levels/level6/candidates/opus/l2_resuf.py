@@ -10,6 +10,8 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 from harness import HERE, LEVEL, cases, load_best, save_best, valid, run_job
+from l2_bounce import best_bounce
+BOUNCE = os.environ.get('BOUNCE', '1') == '1'
 from levels.level6.candidates.astra import board, ring, DIRS, NB
 
 
@@ -154,6 +156,10 @@ def main():
                       flush=True)
             if nosave:
                 continue
+            if prog and BOUNCE and valid(r, pat, count, prog):
+                bb = best_bounce(r, pat, count, prog)
+                if bb and len(bb) < len(prog):
+                    prog = bb
             if prog and len(prog) < len(best[i]) and valid(r, pat, count, prog):
                 print('pattern %d (cut %d seed %s): %d -> %d' % (i, t, s, len(best[i]), len(prog)), flush=True)
                 best[i] = prog

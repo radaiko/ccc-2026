@@ -68,6 +68,38 @@ def bounce(md, cfgs, prog, count, hi, lo, M0, ndone, maxlen, waitmode, waitturn=
     return out
 
 
+def best_bounce(r, pat, count, prog):
+    """Shortest bounce variant of prog (or None)."""
+    md = Model(r, pat)
+    cfgs = md.configs(prog)
+    Ms = []
+    M = 0
+    nd = 0
+    subs = []
+    for t, c in enumerate(cfgs):
+        M, s = md.step(M, c)
+        if s:
+            nd += 1
+            subs.append(t)
+        Ms.append((M, nd))
+    if len(subs) < count:
+        return None
+    bestc = None
+    for hi in subs[:count - 1]:
+        M0, nd0 = Ms[hi]
+        for lo in range(0, hi):
+            for wm in (0, 1):
+                for wt in (0, 1):
+                    for ts in (True, False):
+                        if not ts and wm:
+                            continue
+                        lim = len(bestc) if bestc else len(prog)
+                        c = bounce(md, cfgs, prog, count, hi, lo, M0, nd0, lim, wm, wt, ts)
+                        if c and (bestc is None or len(c) < len(bestc)):
+                            bestc = c
+    return bestc
+
+
 def main():
     args = sys.argv[1:]
     only = None
