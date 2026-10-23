@@ -723,6 +723,50 @@ def multi(r, pat, a, b, tries, ftmo, atmo):
     return None
 
 
+def build_from_cycle(r, pat, count, cfg, subs, B, tmo, tmax=None, nsubs=(1, 2), joint=True):
+    """Program = shortest SAT prefix (with n submissions, n in nsubs) into one of the cycle's submission
+    configs + the cycle (rotated), cut at count. Prefix lengths are tried downward from the largest useful one
+    while SAT. If nothing beats B, the joint model (prefix + some (K,m) cycle) is tried too."""
+    K = len(cfg)
+    cl = lines_between([cfg[-1]] + cfg)
+    m = max(1, len(subs))
+    best = None
+    for n in nsubs:
+        if n >= count:
+            continue
+        for j in subs:
+            cont = (cl[j + 1:] + cl[:j + 1]) * ((count - 1) // m + 2)
+            # submission ticks of the rotated cycle (1-based), the (count-n)-th one ends the program
+            rel = sorted(((x - j - 1) % K) + 1 for x in subs)
+            need = count - n
+            restlen = ((need - 1) // m) * K + rel[(need - 1) % m] if need > 0 else 0
+            cur = len(best) if best else B
+            T0 = min(tmax or 10 ** 9, cur - 1 - restlen)
+            while T0 >= n:
+                res = prefix_to(r, pat, T0, cfg[j], tmo, n)
+                log('build n=%d j=%d T0=%d (rest %d): %s' % (n, j, T0, restlen, 'UNSAT' if res is None else
+                                                             res if res == 'unknown' else 'SAT'))
+                if res is None or res == 'unknown':
+                    break
+                prog = truncate(r, pat, count, res + cont)
+                if prog and len(prog) < (len(best) if best else B):
+                    best = prog
+                T0 -= 1
+    if joint and best is None and count > 1:
+        rest = ((count - 1) // m) * K - (K - 1 - max(subs[0], 0)) if subs else (count - 1) * K
+        T0 = B - 1 - max(rest, 0)
+        while T0 >= 1:
+            res = prog_with_prefix(r, pat, count, K, m, T0, tmo)
+            log('build joint K=%d m=%d T0=%d: %s' % (K, m, T0, 'UNSAT' if res is None else res
+                                                      if res == 'unknown' else 'len %d' % len(res)))
+            if res is None or res == 'unknown':
+                break
+            if len(res) < (len(best) if best else B):
+                best = res
+            T0 -= 1
+    return best
+
+
 def auto2(r, pat, count, best, tmo, ctmo, mmax=3, maxfail=2, joint=True):
     """Cycles (K,m) with rate <= current, tried from the current rate downwards (stop after `maxfail`
     consecutive failures); for the best cycles a shortest prefix into one of its submission configs."""
@@ -825,7 +869,12 @@ def main():
     elif mode in ('anchor', 'prefix', 'seg'):
         best = [l for l in open(sys.argv[4]).read().splitlines() if l.strip()]
         tmo = int(sys.argv[5]) if len(sys.argv) > 5 else 20000
-        res = {'anchor': anchor, 'prefix': prefix_opt, 'seg': segopt}[mode](r, pat, count, best, tmo)
+        if mode == 'seg':
+            import os
+            res = segopt(r, pat, count, best, tmo, int(os.environ.get('SEGJ', '2')),
+                         int(os.environ.get('SEGMAX', '40')))
+        else:
+            res = {'anchor': anchor, 'prefix': prefix_opt}[mode](r, pat, count, best, tmo)
         if res:
             n = simulate(r, pat, [l.split() for l in res])
             log('RESULT len %d sim %d/%d (best %d)' % (len(res), n, count, len(best)))

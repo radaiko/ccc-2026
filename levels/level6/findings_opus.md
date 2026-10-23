@@ -72,3 +72,6 @@
   same submissions in fewer lines, both ends fixed, replaces all identical occurrences) is fast (anchored
   instances solve in ~1 s): 197 68 -> 67. Anchored cycles at the current submission configs of 167/50 are UNSAT
   for every lower rate (the beams' cycles are locally optimal at their anchors). Medium total 5854.
+- [large agent, medium run-ins] Any valid 2-tick copy after a submission can be repeated forever (reversible moves), so if no prefix "first copy at T0 + second copy 2 ticks later" exists (runin.py j=2 UNSAT), the total is >= f_min + 1 + 2(c-1)... for 106 and 33 this proves the current programs optimal. After the run-in fixes all 169 non-repeat-gap medium patterns are provably optimal given the per-copy floors.
+- [medium-cycles agent] retauto pass 2 (top 20, NC 2/3/1, kplus 1, runin 6): 153 75->58 (2 copies / 6 ticks = 3.0
+  per copy), 28 61->57, 26 54->52, 186 ->28, 180 ->50, 58 35->32. Medium 5847.
