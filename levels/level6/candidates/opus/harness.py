@@ -37,7 +37,9 @@ def load_best(name):
     """Own best, merged with every other run directory (other agents keep improving)."""
     path = RUNS / ('best_%s.json' % name)
     best = json.loads(path.read_text()) if path.exists() else None
-    for d in sorted((LEVEL / 'runs').iterdir()) + [LEVEL / 'output']:
+    # output2/ = results pushed to the branch by the other team's agent (pulled into the commit worktree)
+    extra = [LEVEL / 'output', LEVEL / 'output2', Path('/private/tmp/claude-501/-Users-laurenzwurdinger-Documents-dev-CodingContest/5e9e1394-2f05-4762-ad31-a81358130714/scratchpad/wt/levels/level6/output2')]
+    for d in sorted((LEVEL / 'runs').iterdir()) + extra:
         f = d / ('out_level-6_%s.txt' % name)
         if d == RUNS or not f.exists():
             continue
@@ -45,8 +47,13 @@ def load_best(name):
         if best is None:
             best = progs
         elif len(progs) == len(best):
+            external = d.name == 'output2'
+            cs = list(cases((LEVEL / 'data' / ('in_level-6_%s.txt' % name)).read_text())) if external else None
             for i, p in enumerate(progs):
                 if len(p) < len(best[i]):
+                    # programs from the other team's folder are simulated before they are trusted
+                    if external and not valid(*cs[i], p):
+                        continue
                     best[i] = p
     return best
 

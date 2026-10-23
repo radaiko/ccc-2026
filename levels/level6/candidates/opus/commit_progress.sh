@@ -25,7 +25,14 @@ with open(os.path.join(wt, '..', '.commit.pylock'), 'w') as lock:
     if subprocess.run(['git', '-C', wt, 'diff', '--cached', '--quiet']).returncode == 0:
         print('nothing to commit'); sys.exit(0)
     subprocess.run(['git', '-C', wt, 'commit', '-q', '-m', msg + '\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'], check=True)
-    subprocess.run(['git', '-C', wt, 'pull', '-q', '--rebase', 'origin', 'level6-findings-astra-opus'], check=False)
+    pr = subprocess.run(['git', '-C', wt, 'pull', '-q', '--rebase', 'origin', 'level6-findings-astra-opus'])
+    if pr.returncode != 0:
+        # never leave the worktree stuck mid-rebase: abort and fall back to a merge (findings merge as union)
+        subprocess.run(['git', '-C', wt, 'rebase', '--abort'])
+        mr = subprocess.run(['git', '-C', wt, 'pull', '-q', '--no-rebase', '--no-edit', 'origin', 'level6-findings-astra-opus'])
+        if mr.returncode != 0:
+            subprocess.run(['git', '-C', wt, 'merge', '--abort'])
+            print('commit ok, PUSH FAILED (merge conflict with remote)'); sys.exit(0)
     r = subprocess.run(['git', '-C', wt, 'push', '-q', 'origin', 'HEAD:level6-findings-astra-opus'])
     print('committed and pushed' if r.returncode == 0 else 'commit ok, PUSH FAILED')
 PY
