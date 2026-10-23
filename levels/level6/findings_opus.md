@@ -160,3 +160,4 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
 - [enormous agent] Tail term works with WH=100: resuffix from the line where each copy reaches 85% / 92% of its
   cells (resuf_e.py cuts p0.85,p0.92), width 2000, top-40 programs (138 cuts): sum(new-best) WTM=0 -7 (26 wins),
   WTM=1 -71 (47 wins), WTM=2 -93 (53 wins), WTM=4 -7 (8 fails), WTM=6 +120.
+- [large agent, medium run-ins] 41 repeat-gap patterns: exact SAT fixed-junction prefixes (runin2.py: q copies ending exactly in the config after submission s, then the periodically extended rest of the best program) gave 187 13->12 and 167 122->121; SAT goes 'unknown' (30 s) for r=5 prefixes of >= 15 ticks. The beam variant (runin3.py, beamL TARGET/CNTOVR, width 1000, s<=8, q in s..s+2, 707 jobs) found nothing.
