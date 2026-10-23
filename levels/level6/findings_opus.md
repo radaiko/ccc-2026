@@ -178,3 +178,7 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
 - Branch level6-findings-astra-opus is shared with another team's agent, which pushes to levels/level6/output2/.
   opus total.py/load_best merge output2 per pattern (simulated before trusted), so output/ = best of both teams;
   findings *.md files merge as union, and the commit script never leaves the worktree mid-rebase.
+- All opus code is on the branch: levels/level6/candidates/opus/ (sources, drivers, AGENT_BRIEF.md, build.sh that
+  rebuilds every binary incl. the PGO beam_e4) and candidates/opus/tools/ (intervals.py = per-pattern submission
+  gaps, profile.py = per-tick progress, waste.py = tail/travel waste per file; they contain absolute paths of the
+  original laptop: adjust sys.path / file locations on a new machine).
