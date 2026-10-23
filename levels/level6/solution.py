@@ -1,1471 +1,901 @@
 from common import *
+import heapq
+import time
 
-# Level 6: write a short program (6 instructions per line) that makes the pick-up arm
-# submit the given pattern `count` times. Rules = level 5 simulation.
-#
-# Main strategy ("sweep"): pick an axis a. Emitters a and a+3 point in opposite
-# directions along the same family of lines; put both on the same line ("pair") and the
-# whole line gets 2 hits -> every cell of it becomes matter. The other four emitters
-# ("punchers") cross that line: 3+ hits destroy, so they punch the halo cells (cells that
-# must stay empty). The pair sweeps the pattern's lines one per tick; the line's final
-# state is decided by the last tick the pair painted it. Lines with too many halo cells
-# are fixed afterwards in "lag" ticks (one pair emitter stays, two punchers meet it at the
-# hole = triple point). Builds alternate direction, so repeated patterns cost one tick per
-# line. Every program is verified with an independent level-5 simulator; a simple
-# per-cell program is the fallback.
-#
-# ASSUMPTION: a program is valid when the simulation submits AT LEAST `count` patterns
-# (the official sandbox only flags "accepts X of N" when X < N); we stop at exactly count.
-# ASSUMPTION (team validator): all emitters must be inactive at the end -> final T line.
+# Level 6: write programs that submit each pattern `count` times, using as few lines as possible.
+# Simulation rules are ported from data/sandbox-level-6.html. Each tick runs the 6 instructions,
+# then sets cells hit by exactly 2 beams to matter and clears cells hit by 3 or more, then accepts
+# the pattern at most once (every M cell is matter and no 'O' cell next to an M is matter).
+# ASSUMPTION: all emitters are switched off at the end of each program, as validator.py requires.
 
-DIRS = [(0, 2), (1, 1), (1, -1), (0, -2), (-1, -1), (-1, 1)]
-NB = [(0, 2), (0, -2), (1, 1), (1, -1), (-1, 1), (-1, -1)]
-LAMBDA = 3.0
-DEBUG = False
+DIR_TO = [(2, 0), (1, 1), (-1, 1), (-2, 0), (-1, -1), (1, -1)]  # (dc, dr): E SE SW W NW NE
+FIRE = [(2, 0), (1, 1), (-1, 1), (-2, 0), (-1, -1), (1, -1)]  # emitter t fires FIRE[t]
+OPTS = ('-', 'F', 'B', 'T')
+AXES = ((0, 3), (1, 4), (2, 5))
 
 
-def axis_line(a, y, x):
-    return y if a == 0 else (x - y if a == 1 else x + y)
+class Geo(object):
+    def __init__(self, R):
+        radius = R + 1
+        rows, cols = 2 * radius - 1, 4 * radius - 3
+        self.R, self.rows, self.cols = R, rows, cols
 
+        def in_grid(c, r):
+            if r < 0 or r >= rows or (r + c + radius + 1) % 2:
+                return False
+            if r < radius:
+                return c + r >= radius - 1 and c - r <= cols - radius + 1
+            return c + (2 * radius - 1 - r) >= radius - 1 and c + r - 2 * radius + 1 < cols - radius + 1
 
-class Geo:
-    def __init__(self, r):
-        self.r = r
-        h, w = 2 * r + 1, 4 * r + 1
-        self.h, self.w = h, w
-        inter = set()
-        for i in range(h):
-            k = abs(i - r)
-            n = 2 * r + 1 - k
-            if k == r:
-                continue
-            for j in range(1, n - 1):
-                inter.add((i, k + 2 * j))
-        self.inter = inter
-        ring = []
-        i, c = r, 0
-        for di, dc in [(-1, 1), (0, 2), (1, 1), (1, -1), (0, -2), (-1, -1)]:
-            for _ in range(r):
-                ring.append((i, c))
-                i += di
+        idx = {}
+        cells = []
+        for r in range(rows):
+            for c in range(cols):
+                if not in_grid(c, r):
+                    continue
+                rail = r == 0 or r == rows - 1
+                if r < radius:
+                    rail = rail or c == radius - 1 - r or c == cols - radius + r
+                else:
+                    rail = rail or c == r - radius + 1 or c == cols + radius - 2 - r
+                if not rail:
+                    idx[(r, c)] = len(cells)
+                    cells.append((r, c))
+        self.idx, self.cells, self.n = idx, cells, len(cells)
+        per = []
+        c, r = 0, radius - 1
+        for dc, dr in [(1, -1), (2, 0), (1, 1), (-1, 1), (-2, 0), (-1, -1)]:
+            for _ in range(radius - 1):
+                per.append((c, r))
                 c += dc
-        self.ring = ring
-        m = 6 * r
-        self.m = m
-        self.rays = [[None] * m for _ in range(6)]
-        self.lineof = [[None] * m for _ in range(6)]
-        self.idx = [dict() for _ in range(6)]
-        for e in range(6):
-            dy, dx = DIRS[e]
-            a = e % 3
-            for p in range(m):
-                y, x = ring[p]
-                y += dy
-                x += dx
-                cells = []
-                while 0 <= y < h and 0 <= x < w:
-                    if (y, x) in inter:
-                        cells.append(y * w + x)
-                    y += dy
-                    x += dx
-                self.rays[e][p] = cells
-                if cells:
-                    L = axis_line(a, cells[0] // w, cells[0] % w)
-                    self.lineof[e][p] = L
-                    home = e * r
-                    old = self.idx[e].get(L)
-                    if old is None or self.dist(p, home) < self.dist(old, home):
-                        self.idx[e][L] = p
-
-    def cross(self, a1, L1, a2, L2):
-        """Cell id where line L1 of axis a1 meets line L2 of axis a2 (a1 != a2), or None."""
-        if a1 > a2:
-            a1, L1, a2, L2 = a2, L2, a1, L1
-        if a1 == 0:
-            y = L1
-            x = L2 + L1 if a2 == 1 else L2 - L1
-        else:
-            if (L1 + L2) & 1:
-                return None
-            x = (L1 + L2) // 2
-            y = (L2 - L1) // 2
-        if (y, x) in self.inter:
-            return y * self.w + x
-        return None
-
-    def dist(self, p, q):
-        d = (q - p) % self.m
-        return min(d, self.m - d)
-
-    def step_dir(self, p, q):
-        d = (q - p) % self.m
-        return 'F' if d <= self.m - d else 'B'
+                r += dr
+        self.per = per
+        P = self.P = len(per)
+        # ray[t][p]: bitmask of interior cells hit by emitter t standing at perimeter p.
+        ray = [[0] * P for _ in range(6)]
+        for p, (c0, r0) in enumerate(per):
+            for t, (dc, dr) in enumerate(FIRE):
+                m = 0
+                c, r = c0 + dc, r0 + dr
+                while in_grid(c, r):
+                    k = idx.get((r, c))
+                    if k is not None:
+                        m |= 1 << k
+                    c += dc
+                    r += dr
+                ray[t][p] = m
+        self.ray = ray
+        self.reach = [[ray[t][(p - 1) % P] | ray[t][p] | ray[t][(p + 1) % P] for p in range(P)] for t in range(6)]
+        self.reach2 = [[self.reach[t][(p - 1) % P] | self.reach[t][(p + 1) % P] for p in range(P)] for t in range(6)]
+        # Line index of a cell on each axis; target perimeter position per emitter and line.
+        self.nb = [0] * self.n
+        for k, (r, c) in enumerate(cells):
+            m = 0
+            for dc, dr in DIR_TO:
+                j = idx.get((r + dr, c + dc))
+                if j is not None:
+                    m |= 1 << j
+            self.nb[k] = m
+        # For each emitter: map from line mask -> perimeter position, and per cell the position.
+        self.cellpos = [[None] * self.n for _ in range(6)]
+        self.linepos = []  # per emitter: list of (p, mask) for useful positions
+        for t in range(6):
+            lst = []
+            for p in range(P):
+                m = ray[t][p]
+                if m:
+                    lst.append((p, m))
+                    mm = m
+                    while mm:
+                        low = mm & -mm
+                        self.cellpos[t][low.bit_length() - 1] = p
+                        mm ^= low
+            self.linepos.append(lst)
+        # ring distance table
+        self.rd = [[min((a - b) % P, (b - a) % P) for b in range(P)] for a in range(P)]
 
 
-# ---------------------------------------------------------------- simulation
-
-class Sim:
-    """Exact level-5 simulation with undo, plus pattern bookkeeping."""
-
-    def __init__(self, geo, st, pcells):
-        self.g = geo
-        self.st = st              # cid -> 0 don't care, 1 pattern, 2 halo
-        self.pcells = pcells
-        self.totalP = len(pcells)
-        self.bd = [0] * (geo.h * geo.w)
-        self.pos = [e * geo.r for e in range(6)]
-        self.act = [False] * 6
-        self.nP = 0
-        self.nH = 0
-        self.count = 0
-        self.prog = []
-
-    def apply(self, ins):
-        g = self.g
-        m = g.m
-        rec = (self.pos[:], self.act[:], self.nP, self.nH, self.count)
-        pos, act = self.pos, self.act
-        for e in range(6):
-            c = ins[e]
-            if c == 'F':
-                pos[e] = (pos[e] + 1) % m
-            elif c == 'B':
-                pos[e] = (pos[e] - 1) % m
-            elif c == 'T':
-                act[e] = not act[e]
-        cnt = {}
-        for e in range(6):
-            if act[e]:
-                for cid in g.rays[e][pos[e]]:
-                    cnt[cid] = cnt.get(cid, 0) + 1
-        bd, st = self.bd, self.st
-        changes = []
-        for cid, k in cnt.items():
-            if k == 2:
-                if not bd[cid]:
-                    bd[cid] = 1
-                    changes.append((cid, 1))
-                    s = st[cid]
-                    if s == 1:
-                        self.nP += 1
-                    elif s == 2:
-                        self.nH += 1
-            elif k >= 3:
-                if bd[cid]:
-                    bd[cid] = 0
-                    changes.append((cid, 0))
-                    s = st[cid]
-                    if s == 1:
-                        self.nP -= 1
-                    elif s == 2:
-                        self.nH -= 1
-        sub = None
-        if self.nP == self.totalP and self.nH == 0:
-            sub = [cid for cid in self.pcells if bd[cid]]
-            for cid in sub:
-                bd[cid] = 0
-            self.nP = 0
-            self.count += 1
-        self.prog.append(ins)
-        return (rec, changes, sub)
-
-    def undo(self, u):
-        rec, changes, sub = u
-        if sub:
-            for cid in sub:
-                self.bd[cid] = 1
-        for cid, v in changes:
-            self.bd[cid] = 1 - v
-        self.pos, self.act, self.nP, self.nH, self.count = rec[0], rec[1], rec[2], rec[3], rec[4]
-        self.prog.pop()
-
-
-def verify(r, pat, prog):
-    """Independent simulation (accepted level-5 code). Returns number of submissions."""
-    h, w = 2 * r + 1, 4 * r + 1
-    g = []
-    for i in range(h):
-        k = abs(i - r)
-        n = 2 * r + 1 - k
-        cells = ['*'] * n if k == r else ['*'] + ['O'] * (n - 2) + ['*']
-        g.append(list('-' * k + '-'.join(cells) + '-' * k))
-    rg = []
-    i, c = r, 0
-    for di, dc in [(-1, 1), (0, 2), (1, 1), (1, -1), (0, -2), (-1, -1)]:
-        for _ in range(r):
-            rg.append((i, c))
-            i += di
-            c += dc
-    m = len(rg)
-    pcells = [(y, x) for y in range(h) for x in range(w) if pat[y][x] == 'M']
-    pset = set(pcells)
-    halo = set()
-    for y, x in pcells:
-        for dy, dx in NB:
-            q = (y + dy, x + dx)
-            if q not in pset and 0 <= q[0] < h and 0 <= q[1] < w:
-                halo.add(q)
-    pos = [0, r, 2 * r, 3 * r, 4 * r, 5 * r]
-    active = [False] * 6
-    count = 0
-    for line in prog:
-        for e, ins in enumerate(line):
-            if ins == 'F':
-                pos[e] = (pos[e] + 1) % m
-            elif ins == 'B':
-                pos[e] = (pos[e] - 1) % m
-            elif ins == 'T':
-                active[e] = not active[e]
-        cnt = {}
-        for e in range(6):
-            if not active[e]:
-                continue
-            dy, dx = DIRS[e]
-            y, x = rg[pos[e]]
-            y += dy
-            x += dx
-            while 0 <= y < h and 0 <= x < w:
-                if g[y][x] in 'OM':
-                    cnt[(y, x)] = cnt.get((y, x), 0) + 1
-                y += dy
-                x += dx
-        for (y, x), k in cnt.items():
-            if k == 2:
-                g[y][x] = 'M'
-            elif k >= 3:
-                g[y][x] = 'O'
-        if all(g[y][x] == 'M' for y, x in pcells) and \
-                not any(g[y][x] == 'M' for y, x in halo):
-            for y, x in pcells:
-                g[y][x] = 'O'
-            count += 1
-    return count
-
-
-# ---------------------------------------------------------------- schedules
-
-def sched(geo, p0, a0, p1, a1, k, mode):
-    """Instruction list of length k taking (p0,a0) to (p1,a1), or None if too short."""
-    d = geo.dist(p0, p1)
-    mv = [geo.step_dir(p0, p1)] * d if d else []
-    if not a0 and not a1:
-        if d > k:
-            return None
-        return mv + ['-'] * (k - d)
-    if not a0 and a1:
-        if d + 1 > k:
-            return None
-        return mv + ['-'] * (k - d - 1) + ['T']
-    if a0 and not a1:
-        if d + 1 > k:
-            return None
-        return ['T'] + mv + ['-'] * (k - d - 1)
-    if d == 0:
-        return ['-'] * k
-    if mode == 0:            # hot, move early
-        if d > k:
-            return None
-        return mv + ['-'] * (k - d)
-    if mode == 1:            # hot, move late
-        if d > k:
-            return None
-        return ['-'] * (k - d) + mv
-    if d + 2 > k:            # cold: off, move, on
-        return None
-    return ['T'] + mv + ['-'] * (k - d - 2) + ['T']
-
-
-def req(geo, p0, a0, p1, a1, mode):
-    d = geo.dist(p0, p1)
-    if a0 != a1:
-        return d + 1
-    if a0 and mode == 2 and d > 0:
-        return d + 2
-    return d
-
-
-# ---------------------------------------------------------------- sweep planner
-
-class Sweep:
-    def __init__(self, geo, st, pcells, a, lines, holes_by_line, cells_by_line, la):
-        self.g = geo
-        self.st = st
-        self.a = a
-        self.b = (a + 1) % 3
-        self.c = (a + 2) % 3
-        self.pair = (a, a + 3)
-        self.punch = (self.b, self.b + 3, self.c, self.c + 3)
-        self.lines = lines
-        self.holes = holes_by_line
-        self.lcells = cells_by_line
-        self.la = la
-        self.sim = Sim(geo, st, pcells)
-        w = geo.w
-        self.cellline = {}
-        self.yx = lambda cid: (cid // w, cid % w)
-
-    def wrong(self, cid):
-        s = self.st[cid]
-        v = self.sim.bd[cid]
-        return (s == 1 and not v) or (s == 2 and v)
-
-    # validate one applied tick
-    def ok_tick(self, u, cur, lag, last):
-        rec, changes, sub = u
-        order = self.order
-        st = self.st
-        la = self.la
-        for cid, v in changes:
-            s = st[cid]
-            if not s:
-                continue
-            if (s == 1 and v) or (s == 2 and not v):
-                continue
-            o = order.get(la[cid])
-            if o is None or o < cur or (o == cur and lag):
-                return False
-        if sub is not None and cur != last:
-            return False
-        return True
-
-    def run(self, targets, cur, lag, final_ok, modes_list):
-        """Try schedules for the given targets; apply the first valid one.
-        Returns None on failure, else 'sub' if a submission happened, else 'ok'."""
-        g = self.g
-        sim = self.sim
-        last = len(self.order_list) - 1
-        tried = set()
-        for modes in modes_list:
-            k = 1
-            for e in range(6):
-                p1, a1 = targets[e]
-                k = max(k, req(g, sim.pos[e], sim.act[e], p1, a1, modes[e]))
-            plan = []
-            for e in range(6):
-                p1, a1 = targets[e]
-                plan.append(sched(g, sim.pos[e], sim.act[e], p1, a1, k, modes[e]))
-            key = tuple(tuple(x) for x in plan)
-            if key in tried:
-                continue
-            tried.add(key)
-            undos = []
-            good = True
-            subbed = False
-            for t in range(k):
-                ins = [plan[e][t] for e in range(6)]
-                u = sim.apply(ins)
-                undos.append(u)
-                if not self.ok_tick(u, cur, lag, last):
-                    good = False
-                    break
-                if u[2] is not None:
-                    subbed = True
-                    break
-            if good and not subbed and not final_ok():
-                good = False
-            if good:
-                return 'sub' if subbed else 'ok'
-            for u in reversed(undos):
-                sim.undo(u)
-        return None
-
-    def modes_for(self, targets):
-        sim = self.sim
-        hot = [e for e in range(6) if sim.act[e] and targets[e][1] and
-               self.g.dist(sim.pos[e], targets[e][0]) > 0]
-        ml = [[0] * 6]
-        if hot:
-            ml.append([1] * 6)
-            for e in hot:
-                x = [0] * 6
-                x[e] = 2
-                ml.append(x)
-            ml.append([2] * 6)
-        return ml
-
-    def puncher_target(self, e, cid):
-        y, x = self.yx(cid)
-        return self.g.idx[e][axis_line(e % 3, y, x)]
-
-    def est_line(self, pos, act, L):
-        """Rough number of ticks needed to punch line L's holes from (pos, act)."""
-        hs = self.holes[L]
-        g = self.g
-        if not hs:
-            return 0
-        best = 99999
-        pun = self.punch
-        cost = [[req(g, pos[e], act[e], self.puncher_target(e, h), True, 0) for h in hs]
-                for e in pun]
-        n = len(hs)
-        if n <= 4:
-            for perm in permutations(range(4), n):
-                v = 0
-                for hi in range(n):
-                    cc = cost[perm[hi]][hi]
-                    if cc > v:
-                        v = cc
-                if v < best:
-                    best = v
-            return best
-        return max(min(cost[j][hi] for j in range(4)) for hi in range(n)) + (n - 4)
-
-    def paint_candidates(self, i, L):
-        """Candidate targets for the final paint tick of line L (build index i).
-        Each puncher either punches a hole, is switched off, or keeps its state;
-        the final tick is pre-checked analytically (junk crossings, punched pattern)."""
-        g = self.g
-        sim = self.sim
-        st = self.st
-        a = self.a
-        order = self.order
-        la = self.la
-        hs = self.holes[L]
-        hset = set(hs)
-        n = len(hs)
-        pun = self.punch
-        nxt = self.order_list[i + 1] if i + 1 < len(self.order_list) else None
-        wish = self.wishes(nxt) if nxt is not None else None
-        opts = []
-        for e in pun:
-            o = []
-            ax = e % 3
-            costs = []
-            for h in hs:
-                p = self.puncher_target(e, h)
-                costs.append((req(g, sim.pos[e], sim.act[e], p, True, 0), h, p))
-            costs.sort()
-            if n > 6:
-                costs = costs[:4]
-            for c0, h, p in costs:
-                o.append((h, p, True, c0))
-            # off: stay, or drift one step toward the wish for the next line
-            p0 = sim.pos[e]
-            o.append((None, p0, False, req(g, p0, sim.act[e], p0, False, 0)))
-            if wish is not None and wish[e] is not None and wish[e] != p0:
-                d = g.step_dir(p0, wish[e])
-                p1 = (p0 + (1 if d == 'F' else -1)) % g.m
-                o.append((None, p1, False, req(g, p0, sim.act[e], p1, False, 0)))
-                if sim.act[e]:
-                    o.append((None, p1, True, 1))
-            if sim.act[e]:
-                o.append((None, p0, True, 0))
-            opts.append(o)
-        pk = 1
-        for e in self.pair:
-            pk = max(pk, req(g, sim.pos[e], sim.act[e], g.idx[e][L], True, 0))
-        lines_of = [None] * 6
-        cands = []
-        for combo in product(*opts):
-            used = set()
-            okc = True
-            for c in combo:
-                if c[0] is not None:
-                    if c[0] in used:
-                        okc = False
-                        break
-                    used.add(c[0])
-            if not okc:
-                continue
-            k = pk
-            for c in combo:
-                if c[3] > k:
-                    k = c[3]
-            # analytic check of the final tick
-            covered = set()
-            act_lines = []
-            for j in range(4):
-                c = combo[j]
-                if not c[2]:
-                    continue
-                e = pun[j]
-                Le = g.lineof[e][c[1]]
-                if Le is None:
-                    continue
-                z = g.cross(a, L, e % 3, Le)
-                if z is not None:
-                    if st[z] == 1:
-                        okc = False
-                        break
-                    covered.add(z)
-                act_lines.append((e % 3, Le))
-            if not okc:
-                continue
-            for x in range(len(act_lines)):
-                ax1, L1 = act_lines[x]
-                for y in range(x + 1, len(act_lines)):
-                    ax2, L2 = act_lines[y]
-                    if ax1 == ax2:
-                        if L1 == L2:
-                            okc = False
-                        continue
-                    z = g.cross(ax1, L1, ax2, L2)
-                    if z is None or st[z] != 2:
-                        continue
-                    if la[z] == L:
-                        continue
-                    o = order.get(la[z])
-                    if o is None or o < i:
-                        okc = False
-                if not okc:
-                    break
-            if not okc:
-                continue
-            left = [h for h in hs if h not in covered]
-            pos2 = sim.pos[:]
-            act2 = sim.act[:]
-            for e in self.pair:
-                pos2[e] = g.idx[e][L]
-                act2[e] = True
-            for j in range(4):
-                e = pun[j]
-                pos2[e] = combo[j][1]
-                act2[e] = combo[j][2]
-            lk = self.est_line(pos2, act2, nxt) if nxt is not None else 0
-            tg = [(pos2[e], act2[e]) for e in range(6)]
-            cands.append((k + 0.5 * lk + LAMBDA * len(left), k, lk, tg, frozenset(left)))
-        cands.sort(key=lambda z: (z[0], z[1], z[2]))
-        return cands
-
-    def wishes(self, L):
-        """Per puncher: a good position for line L (min-max assignment of its holes)."""
-        hs = self.holes[L]
-        g = self.g
-        sim = self.sim
-        pun = self.punch
-        res = [None] * 6
-        if not hs:
-            return res
-        tgt = [[self.puncher_target(e, h) for h in hs] for e in pun]
-        cost = [[g.dist(sim.pos[e], tgt[j][hi]) for hi in range(len(hs))]
-                for j, e in enumerate(pun)]
-        n = len(hs)
-        best = None
-        if n <= 4:
-            for perm in permutations(range(4), n):
-                v = max(cost[perm[hi]][hi] for hi in range(n))
-                if best is None or v < best[0]:
-                    best = (v, perm)
-            for hi in range(n):
-                j = best[1][hi]
-                res[pun[j]] = tgt[j][hi]
-        else:
-            for j in range(4):
-                hi = min(range(n), key=lambda q: cost[j][q])
-                res[pun[j]] = tgt[j][hi]
-        return res
-
-    def lag_candidates(self, W, leader, lagger, ltarget):
-        g = self.g
-        sim = self.sim
-        holes = [cid for cid in W if self.st[cid] == 2]
-        pats = [cid for cid in W if self.st[cid] == 1]
-        bs = (self.b, self.b + 3)
-        cs = (self.c, self.c + 3)
-        cands = []
-        base = [None] * 6
-        base[lagger] = (sim.pos[lagger], True)
-        base[leader] = ltarget
-        offs = [(sim.pos[e], False) for e in range(6)]
-
-        def mk(assign):
-            tg = base[:]
-            for e in self.punch:
-                tg[e] = offs[e]
-            for e, cid in assign:
-                tg[e] = (self.puncher_target(e, cid), True)
-            k = 1
-            for e in range(6):
-                k = max(k, req(g, sim.pos[e], sim.act[e], tg[e][0], tg[e][1], 0))
-            return tg, k
-
-        for h in holes:
-            for be in bs:
-                for ce in cs:
-                    tg, k = mk([(be, h), (ce, h)])
-                    cands.append((k / 1.0, k, tg, {h}))
-        if len(holes) >= 2:
-            for h1, h2 in combinations(holes, 2):
-                for (b1, b2) in ((bs[0], bs[1]), (bs[1], bs[0])):
-                    for (c1, c2) in ((cs[0], cs[1]), (cs[1], cs[0])):
-                        tg, k = mk([(b1, h1), (c1, h1), (b2, h2), (c2, h2)])
-                        cands.append((k / 2.0, k, tg, {h1, h2}))
-        for pc in pats:
-            for e in self.punch:
-                tg, k = mk([(e, pc)])
-                cands.append((k / 1.0, k, tg, {pc}))
-        cands.sort(key=lambda z: (z[0], z[1]))
-        return cands
-
-    def build(self, order_list):
-        self.order_list = order_list
-        self.order = {L: i for i, L in enumerate(order_list)}
-        sim = self.sim
-        last = len(order_list) - 1
-        start_count = sim.count
-        for i, L in enumerate(order_list):
-            cands = self.paint_candidates(i, L)
-            done = None
-            for sc, k, tot, tg, left in cands[:40]:
-                lc = self.lcells[L]
-
-                def fin(left=left, lc=lc):
-                    for cid in lc:
-                        if self.wrong(cid) and cid not in left:
-                            return False
-                    return True
-                res = self.run(tg, i, False, fin, self.modes_for(tg))
-                if res is not None:
-                    done = res
-                    break
-            if done is None:
-                # always possible: punch nothing, everything left for lag ticks
-                tg = [(sim.pos[e], False) for e in range(6)]
-                for e in self.pair:
-                    tg[e] = (self.g.idx[e][L], True)
-                lc = self.lcells[L]
-                res = self.run(tg, i, False, lambda: True, [[2] * 6, [0] * 6])
-                if res is None:
-                    return False
-                done = res
-            if done == 'sub':
-                if i == last:
-                    return sim.count > start_count
-                return False
-            W = [cid for cid in self.lcells[L] if self.wrong(cid)]
-            if W:
-                if not self.lag(i, L, W, last):
-                    return False
-                if sim.count > start_count:
-                    return i == last
-        return sim.count > start_count
-
-    def lag(self, i, L, W, last):
-        g = self.g
-        sim = self.sim
-        best = None
-        for leader in self.pair:
-            lagger = self.pair[0] if leader == self.pair[1] else self.pair[1]
-            if i < last:
-                ltarget = (g.idx[leader][self.order_list[i + 1]], True)
-            else:
-                ltarget = (sim.pos[leader], False)
-            best = (leader, lagger, ltarget)
-            break
-        leader, lagger, ltarget = best
-        guard = 0
-        while W:
-            guard += 1
-            if guard > 200:
-                return False
-            cands = self.lag_candidates(W, leader, lagger, ltarget)
-            Wset = set(W)
-            res = None
-            for sc, k, tg, fixes in cands[:60]:
-                def fin(fixes=fixes):
-                    for cid in self.lcells[L]:
-                        if self.wrong(cid) and cid not in Wset:
-                            return False
-                    return not any(self.wrong(cid) for cid in fixes)
-                res = self.run(tg, i, True, fin, self.modes_for(tg) + [[2] * 6])
-                if res is not None:
-                    break
-            if res is None:
-                return False
-            if res == 'sub':
-                return True
-            W = [cid for cid in self.lcells[L] if self.wrong(cid)]
-        return True
-
-
-def pattern_info(geo, pat):
-    h, w = geo.h, geo.w
-    st = [0] * (h * w)
-    pcells = []
-    for y in range(h):
-        row = pat[y]
-        for x in range(w):
-            if x < len(row) and row[x] == 'M':
-                st[y * w + x] = 1
-                pcells.append(y * w + x)
-    for cid in pcells:
-        y, x = cid // w, cid % w
-        for dy, dx in NB:
-            yy, xx = y + dy, x + dx
-            if 0 <= yy < h and 0 <= xx < w and (yy, xx) in geo.inter and st[yy * w + xx] == 0:
-                st[yy * w + xx] = 2
-    return st, pcells
-
-
-def sweep_program(geo, st, pcells, a, direction, count, limit):
-    w = geo.w
-    la = [None] * (geo.h * w)
-    for (y, x) in geo.inter:
-        la[y * w + x] = axis_line(a, y, x)
-    lines = sorted({la[cid] for cid in pcells})
-    holes = {}
-    lcells = {}
-    for L in lines:
-        holes[L] = []
-        lcells[L] = []
-    for (y, x) in geo.inter:
-        cid = y * w + x
-        L = la[cid]
-        if L in lcells and st[cid]:
-            lcells[L].append(cid)
-            if st[cid] == 2:
-                holes[L].append(cid)
-    sw = Sweep(geo, st, pcells, a, lines, holes, lcells, la)
-    order = lines if direction > 0 else lines[::-1]
-    while sw.sim.count < count:
-        if not sw.build(order):
-            return None
-        if len(sw.sim.prog) > limit:
-            return None
-        order = order[::-1]
-    return sw.sim.prog
-
-
-def simple_program(geo, st, pcells, count):
-    """Fallback: one cell at a time with emitters 0 and 1, moving only while off."""
-    w = geo.w
-    sim = Sim(geo, st, pcells)
+def parse(text):
+    ls = text.replace('\r', '').split('\n')
+    p = 0
     out = []
-    order = sorted(pcells)
-    while sim.count < count:
-        for cid in order:
-            y, x = cid // w, cid % w
-            t0 = geo.idx[0][axis_line(0, y, x)]
-            t1 = geo.idx[1][axis_line(1, y, x)]
-            k = max(geo.dist(sim.pos[0], t0), geo.dist(sim.pos[1], t1))
-            s0 = sched(geo, sim.pos[0], False, t0, False, k, 0)
-            s1 = sched(geo, sim.pos[1], False, t1, False, k, 0)
-            for t in range(k):
-                sim.apply([s0[t], s1[t], '-', '-', '-', '-'])
-            sim.apply(['T', 'T', '-', '-', '-', '-'])
-            sim.apply(['T', 'T', '-', '-', '-', '-'])
-            if sim.count >= count:
-                break
-    return sim.prog
 
-
-def walker_program(geo, st, pcells, eu, ev, count, limit):
-    """Two beams on different axes; their crossing walks over pattern cells only
-    (creating each one it visits). Far jumps switch one beam off meanwhile.
-    Copies alternate between walking the tour forward and backward."""
-    u, v = eu % 3, ev % 3
-    w = geo.w
-    node = {}
-    for cid in pcells:
-        y, x = cid // w, cid % w
-        node[(geo.idx[eu][axis_line(u, y, x)], geo.idx[ev][axis_line(v, y, x)])] = cid
-    m = geo.m
-    adj = {}
-    for (pu, pv) in node:
-        nb = []
-        for du in (-1, 0, 1):
-            for dv in (-1, 0, 1):
-                if du or dv:
-                    q = ((pu + du) % m, (pv + dv) % m)
-                    if q in node:
-                        nb.append(q)
-        adj[(pu, pv)] = nb
-    dist = geo.dist
-
-    def gate(a, b):
-        d1 = dist(a[0], b[0])
-        d2 = dist(a[1], b[1])
-        return min(max(d1 + 2, d2), max(d1, d2 + 2))
-
-    # states: (pu, au, pv, av) after each tick of one copy; first state creates a cell
-    hu, hv = eu * geo.r, ev * geo.r
-    start = min(node, key=lambda q: (max(dist(hu, q[0]), dist(hv, q[1])), q))
-    cur = start
-    todo = set(node)
-    todo.discard(cur)
-    states = [(cur[0], True, cur[1], True)]
-    while todo:
-        # BFS over pattern nodes
-        prev = {cur: None}
-        dq = deque([cur])
-        best = None
-        bestd = None
-        dd = {cur: 0}
-        while dq:
-            q = dq.popleft()
-            if q in todo:
-                best, bestd = q, dd[q]
-                break
-            for nq in adj[q]:
-                if nq not in dd:
-                    dd[nq] = dd[q] + 1
-                    prev[nq] = q
-                    dq.append(nq)
-        gbest = min(todo, key=lambda q: (gate(cur, q), q))
-        gd = gate(cur, gbest)
-        if best is not None and bestd <= gd:
-            path = []
-            q = best
-            while q != cur:
-                path.append(q)
-                q = prev[q]
-            for q in reversed(path):
-                states.append((q[0], True, q[1], True))
-                todo.discard(q)
-            cur = best
-        else:
-            q = gbest
-            d1 = dist(cur[0], q[0])
-            d2 = dist(cur[1], q[1])
-            if max(d1 + 2, d2) <= max(d1, d2 + 2):
-                k = max(d1 + 2, d2)
-                su = ['T'] + [geo.step_dir(cur[0], q[0])] * d1 + ['-'] * (k - 2 - d1) + ['T']
-                sv = [geo.step_dir(cur[1], q[1])] * d2 + ['-'] * (k - d2)
-                first_off = 0
-            else:
-                k = max(d1, d2 + 2)
-                su = [geo.step_dir(cur[0], q[0])] * d1 + ['-'] * (k - d1)
-                sv = ['T'] + [geo.step_dir(cur[1], q[1])] * d2 + ['-'] * (k - 2 - d2) + ['T']
-                first_off = 1
-            pu, au, pv, av = cur[0], True, cur[1], True
-            for t in range(k):
-                for s_, e_ in ((su[t], 0), (sv[t], 1)):
-                    if s_ == 'T':
-                        if e_ == 0:
-                            au = not au
-                        else:
-                            av = not av
-                    elif s_ in 'FB':
-                        dlt = 1 if s_ == 'F' else -1
-                        if e_ == 0:
-                            pu = (pu + dlt) % m
-                        else:
-                            pv = (pv + dlt) % m
-                states.append((pu, au, pv, av))
-            cur = q
-            todo.discard(q)
-    # program
-    prog = []
-
-    def emit(a, b):
-        ins = ['-'] * 6
-        for e, p0, a0, p1, a1 in ((eu, a[0], a[1], b[0], b[1]), (ev, a[2], a[3], b[2], b[3])):
-            if a0 != a1:
-                ins[e] = 'T'
-            elif p0 != p1:
-                ins[e] = 'F' if (p1 - p0) % m == 1 else 'B'
-        prog.append(ins)
-
-    s0 = states[0]
-    k = max(dist(hu, s0[0]), dist(hv, s0[2]))
-    a = sched(geo, hu, False, s0[0], False, k, 0)
-    b = sched(geo, hv, False, s0[2], False, k, 0)
-    for t in range(k):
-        ins = ['-'] * 6
-        ins[eu] = a[t]
-        ins[ev] = b[t]
-        prog.append(ins)
-    ins = ['-'] * 6
-    ins[eu] = 'T'
-    ins[ev] = 'T'
-    prog.append(ins)
-    sim = Sim(geo, st, pcells)
-    for ins in prog:
-        sim.apply(ins)
-    seq = states
-    curst = states[0]
-    guard = 0
-    while sim.count < count:
-        guard += 1
-        if guard > 4 * count + 4 or len(sim.prog) > limit:
-            return None
-        if guard > 1:
-            seq = seq[::-1]
-            sim.apply(['-'] * 6)
-            prog.append(['-'] * 6)
-            if sim.count >= count:
-                break
-        for nxt in seq[1:]:
-            n0 = len(prog)
-            emit(curst, nxt)
-            sim.apply(prog[n0])
-            curst = nxt
-            if sim.count >= count:
-                break
-    return prog
-
-
-def static_program(geo, st, pcells):
-    """A fixed beam set whose 2-hit cells contain the whole pattern and no halo cell:
-    then every tick (even '- - - - - -') submits one copy. Returns (setup program, ok)."""
-    w = geo.w
-    lines = [sorted({axis_line(a, cid // w, cid % w) for cid in pcells}) for a in range(3)]
-    if max(len(x) for x in lines) > 12:
-        return None
-    halo = [cid for cid in range(len(st)) if st[cid] == 2]
-
-    def choices(ls):
-        res = [()]
-        for i in range(len(ls)):
-            res.append((ls[i],))
-            for j in range(i, len(ls)):
-                res.append((ls[i], ls[j]))
-        return res
-    yx = [(cid // w, cid % w) for cid in pcells]
-    hyx = [(cid // w, cid % w) for cid in halo]
-    best = None
-    for c0 in choices(lines[0]):
-        h0 = [c0.count(y) for (y, x) in yx]
-        if max(h0) > 2:
-            continue
-        for c1 in choices(lines[1]):
-            need = {}
-            okc = True
-            for i, (y, x) in enumerate(yx):
-                k = 2 - h0[i] - c1.count(x - y)
-                if k < 0:
-                    okc = False
-                    break
-                L = x + y
-                if need.get(L, k) != k:
-                    okc = False
-                    break
-                need[L] = k
-            if not okc:
-                continue
-            c2 = []
-            for L, k in need.items():
-                c2 += [L] * k
-            if len(c2) > 2:
-                continue
-            c2 = tuple(c2)
-            # halo cells must not get exactly 2 hits
-            bad = False
-            for (y, x) in hyx:
-                if c0.count(y) + c1.count(x - y) + c2.count(x + y) == 2:
-                    bad = True
-                    break
-            if bad:
-                continue
-            # assign emitters, cost = setup ticks
-            tg = {}
-            cost = 0
-            for a, cs in ((0, c0), (1, c1), (2, c2)):
-                es = (a, a + 3)
-                if len(cs) == 0:
-                    continue
-                if len(cs) == 1:
-                    opts = [((es[0], cs[0]),), ((es[1], cs[0]),)]
-                else:
-                    opts = [((es[0], cs[0]), (es[1], cs[1])), ((es[0], cs[1]), (es[1], cs[0]))]
-                bo = None
-                for o in opts:
-                    cc = max(geo.dist(e * geo.r, geo.idx[e][L]) for e, L in o)
-                    if bo is None or cc < bo[0]:
-                        bo = (cc, o)
-                cost = max(cost, bo[0])
-                for e, L in bo[1]:
-                    tg[e] = geo.idx[e][L]
-            if best is None or cost < best[0]:
-                best = (cost, tg)
-    if best is None:
-        return None
-    k, tg = best
-    prog = []
-    sch = {e: sched(geo, e * geo.r, False, p, False, k, 0) for e, p in tg.items()}
-    for t in range(k):
-        prog.append([sch[e][t] if e in sch else '-' for e in range(6)])
-    prog.append(['T' if e in tg else '-' for e in range(6)])
-    return prog
-
-
-class Cyc:
-    """Short window of 'safe' configurations (no halo cell gets exactly 2 hits, no
-    pattern cell gets 3+), consecutive ones one instruction apart, whose created cells
-    cover the pattern. Copies walk the window forward and backward."""
-
-    def __init__(self, geo, st, pcells):
-        self.g = geo
-        self.st = st
-        w = geo.w
-        r = geo.r
-        self.pcells = pcells
-        self.bit = {cid: 1 << i for i, cid in enumerate(pcells)}
-        self.full = (1 << len(pcells)) - 1
-        # line ids per axis -> index
-        self.lids = []
-        self.lidx = []
-        for a in range(3):
-            ids = sorted({axis_line(a, y, x) for (y, x) in geo.inter})
-            self.lids.append(ids)
-            self.lidx.append({L: i for i, L in enumerate(ids)})
-        n = len(geo.inter)
-        self.la = [dict() for _ in range(3)]
-        cellla = {}
-        for (y, x) in geo.inter:
-            cid = y * w + x
-            cellla[cid] = tuple(self.lidx[a][axis_line(a, y, x)] for a in range(3))
-        self.cellla = cellla
-        nl = [len(self.lids[a]) for a in range(3)]
-        self.X = {}
-        for a1 in range(3):
-            for a2 in range(3):
-                if a1 == a2:
-                    continue
-                tab = []
-                for i1 in range(nl[a1]):
-                    row = []
-                    for i2 in range(nl[a2]):
-                        z = geo.cross(a1, self.lids[a1][i1], a2, self.lids[a2][i2])
-                        row.append(-1 if z is None else z)
-                    tab.append(row)
-                self.X[(a1, a2)] = tab
-        self.patbits = [[0] * nl[a] for a in range(3)]
-        self.holes = [[[] for _ in range(nl[a])] for a in range(3)]
-        for cid, ls in cellla.items():
-            s = st[cid]
-            for a in range(3):
-                if s == 1:
-                    self.patbits[a][ls[a]] |= self.bit[cid]
-                elif s == 2:
-                    self.holes[a][ls[a]].append(cid)
-        # beam (axis, line index) per emitter position
-        self.beam = []
-        for e in range(6):
-            row = []
-            for p in range(geo.m):
-                L = geo.lineof[e][p]
-                row.append(None if L is None else (e % 3, self.lidx[e % 3][L]))
-            self.beam.append(row)
-        # useful line index range per axis (pattern lines +- 1)
-        self.rng = []
-        for a in range(3):
-            ls = sorted({cellla[c][a] for c in pcells})
-            self.rng.append((ls[0] - 1, ls[-1] + 1))
-
-    def evaluate(self, beams):
-        st = self.st
-        X = self.X
-        cl = self.cellla
-        seen = {}
-        for b in beams:
-            seen[b] = seen.get(b, 0) + 1
-        pairs = []
-        singles = []
-        for b, k in seen.items():
-            if k == 2:
-                pairs.append(b)
-            else:
-                singles.append(b)
-        created = 0
-        allb = pairs + singles
-        for (a, i) in pairs:
-            Z = set()
-            for (a2, i2) in allb:
-                if a2 == a:
-                    continue
-                z = X[(a, a2)][i][i2]
-                if z >= 0:
-                    if st[z] == 1:
-                        return -1
-                    Z.add(z)
-            for h in self.holes[a][i]:
-                if h not in Z:
-                    return -1
-            created |= self.patbits[a][i]
-        ns = len(singles)
-        bit = self.bit
-        for x in range(ns):
-            a1, i1 = singles[x]
-            for y in range(x + 1, ns):
-                a2, i2 = singles[y]
-                if a1 == a2:
-                    continue
-                z = X[(a1, a2)][i1][i2]
-                if z < 0:
-                    continue
-                lz = cl[z]
-                skip = False
-                for (a, i) in pairs:
-                    if lz[a] == i:
-                        skip = True
-                        break
-                if skip:
-                    continue
-                third = False
-                for q in range(ns):
-                    if q != x and q != y:
-                        a3, i3 = singles[q]
-                        if a3 != a1 and a3 != a2 and lz[a3] == i3:
-                            third = True
-                            break
-                s = st[z]
-                if third:
-                    if s == 1:
-                        return -1
-                    continue
-                if s == 2:
-                    return -1
-                if s == 1:
-                    created |= bit[z]
-        return created
-
-    def beams_of(self, pos, act):
-        res = []
-        for e in range(6):
-            if act[e]:
-                b = self.beam[e][pos[e]]
-                if b is not None:
-                    res.append(b)
-        return res
-
-    def seeds(self, rnd, tries):
-        """Local search for safe configurations with large coverage."""
-        g = self.g
-        opts = []
-        for e in range(6):
-            a = e % 3
-            lo, hi = self.rng[a]
-            o = [None]
-            for i in range(max(lo, 0), min(hi, len(self.lids[a]) - 1) + 1):
-                p = g.idx[e].get(self.lids[a][i])
-                if p is not None:
-                    o.append(p)
-            opts.append(o)
-
-        def cov(cfg):
-            beams = [self.beam[e][cfg[e]] for e in range(6) if cfg[e] is not None]
-            c = self.evaluate(beams)
-            return c
-
-        found = {}
-        for t in range(tries):
-            cfg = [rnd.choice(opts[e]) if rnd.random() < 0.7 else None for e in range(6)]
-            c = cov(cfg)
-            if c < 0:
-                cfg = [None] * 6
-                c = 0
-            cur = bin(c).count('1')
-            while True:
-                best = None
-                for e in range(6):
-                    old = cfg[e]
-                    for o in opts[e]:
-                        if o == old:
-                            continue
-                        cfg[e] = o
-                        c2 = cov(cfg)
-                        if c2 >= 0:
-                            v = bin(c2).count('1')
-                            if v > cur and (best is None or v > best[0]):
-                                best = (v, e, o)
-                    cfg[e] = old
-                if best is None:
-                    break
-                cur = best[0]
-                cfg[best[1]] = best[2]
-            key = tuple(cfg)
-            if cur > 0:
-                found[key] = cur
-        return sorted(found.items(), key=lambda kv: -kv[1])
-
-    def search(self, count, width, maxt, rnd):
-        g = self.g
-        m = g.m
-        seeds = self.seeds(rnd, 40)[:width * 2]
-        if not seeds:
-            return None
-        # median pattern line per axis for idle emitters
-        med = []
-        for e in range(6):
-            a = e % 3
-            ls = sorted(self.cellla[c][a] for c in self.pcells)
-            med.append(g.idx[e][self.lids[a][ls[len(ls) // 2]]])
-        beam = []
-        for cfg, v in seeds:
-            pos = tuple(cfg[e] if cfg[e] is not None else med[e] for e in range(6))
-            act = tuple(cfg[e] is not None for e in range(6))
-            cov = self.evaluate(self.beams_of(pos, act))
-            setup = max(g.dist(e * g.r, pos[e]) + (1 if act[e] else 0) for e in range(6))
-            beam.append((pos, act, cov, setup, None))
-        # beam entries: (pos, act, covered, setup, parent-chain)
-        hist = [beam]
-        bestc = -1
-        stall = 0
-        for t in range(maxt + 1):
-            done = [s for s in beam if s[2] == self.full]
-            if done:
-                return [(self.chain_of(s), s[3]) for s in done]
-            c0 = max(bin(s[2]).count('1') for s in beam)
-            if c0 > bestc:
-                bestc = c0
-                stall = 0
-            else:
-                stall += 1
-            if stall >= 2 or t == maxt:
-                res = []
-                for s in beam[:4]:
-                    ch = self.chain_of(s)
-                    ext = self.complete(s[0], s[1], s[2])
-                    if ext is not None:
-                        res.append((ch + ext, s[3]))
-                return res or None
-            nxt = {}
-            for st_ in beam:
-                pos, act, cov, setup, par = st_
-                eopts = []
-                for e in range(6):
-                    p = pos[e]
-                    o = [(p, act[e]), ((p + 1) % m, act[e]), ((p - 1) % m, act[e]), (p, not act[e])]
-                    eopts.append(o)
-                for combo in product(*eopts):
-                    beams = []
-                    for e in range(6):
-                        if combo[e][1]:
-                            b = self.beam[e][combo[e][0]]
-                            if b is not None:
-                                beams.append(b)
-                    c = self.evaluate(beams)
-                    if c < 0:
-                        continue
-                    nc = cov | c
-                    npos = tuple(x[0] for x in combo)
-                    nact = tuple(x[1] for x in combo)
-                    key = (npos, nact, nc)
-                    old = nxt.get(key)
-                    if old is None or old[3] > setup:
-                        nxt[key] = (npos, nact, nc, setup, st_)
-            if not nxt:
-                return None
-            cand = sorted(nxt.values(), key=lambda s: (-bin(s[2]).count('1'), s[3]))
-            cand = cand[:width * 6]
-            sc = []
-            for s in cand:
-                sc.append((-bin(s[2]).count('1'), self.h(s[0], s[1], s[2]), s[3], s))
-            sc.sort(key=lambda z: z[:3])
-            beam = [z[3] for z in sc[:width]]
-            hist.append(beam)
-            if DEBUG: print("t", t, [bin(s[2]).count("1") for s in beam[:5]], self.h(beam[0][0], beam[0][1], beam[0][2]), len(self.pcells))
-        return None
-
-    def chain_of(self, s):
-        chain = []
-        while s is not None:
-            chain.append((s[0], s[1]))
-            s = s[4]
-        chain.reverse()
-        return chain
-
-    def complete(self, pos, act, cov):
-        """Create the remaining cells one by one with just two crossing beams."""
-        g = self.g
-        m = g.m
-        pos = list(pos)
-        act = list(act)
-        out = []
-        left = [cid for i, cid in enumerate(self.pcells) if not cov >> i & 1]
-        while left:
-            best = None
-            for cid in left:
-                ls = self.cellla[cid]
-                for e1 in range(6):
-                    for e2 in range(e1 + 1, 6):
-                        if e1 % 3 == e2 % 3:
-                            continue
-                        p1 = g.idx[e1][self.lids[e1 % 3][ls[e1 % 3]]]
-                        p2 = g.idx[e2][self.lids[e2 % 3][ls[e2 % 3]]]
-                        others = [e for e in range(6) if e != e1 and e != e2 and act[e]]
-                        d1 = g.dist(pos[e1], p1)
-                        d2 = g.dist(pos[e2], p2)
-                        # hot step: only e1, e2 active, one tick
-                        if not others and act[e1] and act[e2] and d1 <= 1 and d2 <= 1:
-                            k = 1
-                            hot = True
-                        else:
-                            hot = False
-                            k = max(d1 + (1 if act[e1] and d1 else 0),
-                                    d2 + (1 if act[e2] and d2 else 0),
-                                    1 if others else 0) + 1
-                        if best is None or k < best[0]:
-                            best = (k, cid, e1, e2, p1, p2, hot)
-            k, cid, e1, e2, p1, p2, hot = best
-            if hot:
-                pos[e1], pos[e2] = p1, p2
-                out.append((tuple(pos), tuple(act)))
-            else:
-                sch = []
-                for e in range(6):
-                    if e == e1 or e == e2:
-                        tp = p1 if e == e1 else p2
-                        if act[e] and pos[e] == tp:
-                            sch.append(['-'] * k)
-                        else:
-                            sch.append(sched(g, pos[e], act[e], tp, True, k, 2))
-                    else:
-                        sch.append(sched(g, pos[e], act[e], pos[e], False, k, 0))
-                for t in range(k):
-                    for e in range(6):
-                        c = sch[e][t]
-                        if c == 'T':
-                            act[e] = not act[e]
-                        elif c == 'F':
-                            pos[e] = (pos[e] + 1) % m
-                        elif c == 'B':
-                            pos[e] = (pos[e] - 1) % m
-                    out.append((tuple(pos), tuple(act)))
-            # cells now covered by the final state
-            c = self.evaluate(self.beams_of(pos, act))
-            if c < 0:
-                return None
-            left = [x for x in left if not c & self.bit[x]]
-        return out
-
-    def h(self, pos, act, cov):
-        """Ticks until the nearest uncovered cell could be hit by two beams."""
-        g = self.g
-        best = 99
-        tot = 0
-        for i, cid in enumerate(self.pcells):
-            if cov >> i & 1:
-                continue
-            ls = self.cellla[cid]
-            d = []
-            for e in range(6):
-                a = e % 3
-                p = g.idx[e].get(self.lids[a][ls[a]])
-                d.append(g.dist(pos[e], p) + (0 if act[e] else 1))
-            v = 99
-            for a1 in range(3):
-                x1 = min(d[a1], d[a1 + 3])
-                for a2 in range(a1 + 1, 3):
-                    x2 = min(d[a2], d[a2 + 3])
-                    y = x1 if x1 > x2 else x2
-                    if y < v:
-                        v = y
-            tot += v
-            if v < best:
-                best = v
-        return best * 100 + tot
-
-    def program(self, count, width=12, maxt=12, seed=1):
-        import random
-        rnd = random.Random(seed)
-        res = self.search(count, width, maxt, rnd)
-        if not res:
-            return None
-        chain = min(res, key=lambda z: z[1] + len(z[0]) * count)[0]
-        g = self.g
-        m = g.m
-        prog = []
-        pos0, act0 = chain[0]
-        k = max(1, max(g.dist(e * g.r, pos0[e]) + (1 if act0[e] else 0) for e in range(6)))
-        sch = [sched(g, e * g.r, False, pos0[e], act0[e], k, 0) for e in range(6)]
-        for t in range(k):
-            prog.append([sch[e][t] for e in range(6)])
-
-        def ins(a, b):
-            out = []
-            for e in range(6):
-                if a[1][e] != b[1][e]:
-                    out.append('T')
-                elif a[0][e] != b[0][e]:
-                    out.append('F' if (b[0][e] - a[0][e]) % m == 1 else 'B')
-                else:
-                    out.append('-')
-            return out
-        sim = Sim(g, self.st, self.pcells)
-        for x in prog:
-            sim.apply(x)
-        cur = chain[0]
-        seq = chain
-        first = True
-        guard = 0
-        while sim.count < count:
-            guard += 1
-            if guard > 3 * count + 5:
-                return None
-            if not first:
-                seq = seq[::-1]
-                x = ['-'] * 6
-                prog.append(x)
-                sim.apply(x)
-                if sim.count >= count:
-                    break
-            first = False
-            for nx in seq[1:]:
-                x = ins(cur, nx)
-                prog.append(x)
-                sim.apply(x)
-                cur = nx
-                if sim.count >= count:
-                    break
-        return prog
-
-
-def solve_one(r, pat, count):
-    geo = Geo(r)
-    st, pcells = pattern_info(geo, pat)
-    best = simple_program(geo, st, pcells, count)
-    if verify(r, pat, best) < count:
-        best = None
-    try:
-        cy = Cyc(geo, st, pcells)
-        cp = cy.program(count, 30, 40)
-    except Exception:
-        cp = None
-    if cp is not None and (best is None or len(cp) < len(best)) and verify(r, pat, cp) >= count:
-        best = cp
-    sp = static_program(geo, st, pcells)
-    if sp is not None:
-        sp = sp + [['-'] * 6 for _ in range(count - 1)]
-        if (best is None or len(sp) < len(best)) and verify(r, pat, sp) >= count:
-            best = sp
-    for eu in range(6):
-        for ev in range(eu + 1, 6):
-            if eu % 3 == ev % 3:
-                continue
-            lim = len(best) if best else 10 ** 9
-            prog = walker_program(geo, st, pcells, eu, ev, count, lim)
-            if prog is None or (best is not None and len(prog) >= len(best)):
-                continue
-            if verify(r, pat, prog) >= count:
-                best = prog
-    for a in range(3):
-        for d in (1, -1):
-            lim = len(best) if best else 10 ** 9
-            prog = sweep_program(geo, st, pcells, a, d, count, lim)
-            if prog is None:
-                continue
-            if best is not None and len(prog) >= len(best):
-                continue
-            if verify(r, pat, prog) >= count:
-                best = prog
-    # The validator requires every emitter to be switched off when the program ends.
-    act = [False] * 6
-    for ins in best:
-        for e in range(6):
-            if ins[e] == 'T':
-                act[e] = not act[e]
-    if any(act):
-        best = best + [['T' if act[e] else '-' for e in range(6)]]
-    return best
-
-
-def solve(text):
-    t = text.split('\n')
-    n = int(t[0].split()[0])
-    p = 1
-    out = []
-    for q in range(n):
-        while not t[p].strip():
+    def nxt():
+        nonlocal p
+        while not ls[p].strip():
             p += 1
-        r, hh, ww, cnt = map(int, t[p].split())
         p += 1
-        pat = [s.rstrip('\r') for s in t[p:p + hh]]
-        p += hh
-        prog = solve_one(r, pat, cnt)
-        if q:
+        return ls[p - 1].strip()
+
+    n = int(nxt().split()[0])
+    for _ in range(n):
+        R, rows, cols, k = map(int, nxt().split())
+        pat = [nxt() for _ in range(rows)]
+        out.append((R, k, pat))
+    return out
+
+
+def pattern_masks(g, pat):
+    S = K = 0
+    for k, (r, c) in enumerate(g.cells):
+        if pat[r][c] == 'M':
+            S |= 1 << k
+    for k in range(g.n):
+        if not (S >> k) & 1 and g.nb[k] & S:
+            K |= 1 << k
+    return S, K
+
+
+def simulate(g, S, K, prog):
+    """Number of accepted patterns and final active flags."""
+    pos = [t * g.R for t in range(6)]
+    act = [False] * 6
+    M = 0
+    acc = 0
+    P = g.P
+    for line in prog:
+        for t in range(6):
+            ins = line[t]
+            if ins == 'F':
+                pos[t] = (pos[t] + 1) % P
+            elif ins == 'B':
+                pos[t] = (pos[t] - 1) % P
+            elif ins == 'T':
+                act[t] = not act[t]
+        t1 = t2 = t3 = 0
+        for t in range(6):
+            if act[t]:
+                m = g.ray[t][pos[t]]
+                t3 |= t2 & m
+                t2 |= t1 & m
+                t1 |= m
+        M = (M | (t2 & ~t3)) & ~t3
+        if M & S == S and not M & K:
+            M &= ~S
+            acc += 1
+    return acc, act
+
+
+# ---------------------------------------------------------------- safe fallback
+
+
+def fallback(g, S, K, k, pos, act, M, copies, prog):
+    """Point-by-point: emitter 1 sweeps active alone, emitter 0 flashes on at each target cell."""
+    P = g.P
+    pos = list(pos)
+    act = list(act)
+    if any(act):
+        prog.append(['T' if act[t] else '-' for t in range(6)])
+        act = [False] * 6
+    # clear any matter left on skirt cells: three beams meeting in one cell, nothing else active
+    dirty = M & K
+    while dirty:
+        low = dirty & -dirty
+        c = low.bit_length() - 1
+        dirty ^= low
+        tg = [g.cellpos[t][c] for t in range(3)]
+        while True:
+            line = ['-'] * 6
+            for t in range(3):
+                if pos[t] != tg[t]:
+                    d = (tg[t] - pos[t]) % P
+                    if d <= P - d:
+                        pos[t] = (pos[t] + 1) % P
+                        line[t] = 'F'
+                    else:
+                        pos[t] = (pos[t] - 1) % P
+                        line[t] = 'B'
+            if line == ['-'] * 6:
+                break
+            prog.append(line)
+        prog.append(['T', 'T', 'T', '-', '-', '-'])
+        prog.append(['T', 'T', 'T', '-', '-', '-'])
+    cur_missing = S & ~M
+
+    def step_towards(t, target):
+        d = (target - pos[t]) % P
+        if d == 0:
+            return '-'
+        if d <= P - d:
+            pos[t] = (pos[t] + 1) % P
+            return 'F'
+        pos[t] = (pos[t] - 1) % P
+        return 'B'
+
+    while copies < k:
+        todo = cur_missing
+        while todo:
+            # nearest missing cell
+            best = None
+            mm = todo
+            while mm:
+                low = mm & -mm
+                c = low.bit_length() - 1
+                mm ^= low
+                p0, p1 = g.cellpos[0][c], g.cellpos[1][c]
+                d = max(g.rd[pos[0]][p0] + (1 if act[0] else 0), g.rd[pos[1]][p1])
+                if best is None or d < best[0]:
+                    best = (d, c, p0, p1)
+            _, c, p0, p1 = best
+            # move: emitter 0 must be off; emitter 1 may be on (alone it creates nothing)
+            while True:
+                line = ['-'] * 6
+                if act[0]:
+                    line[0] = 'T'
+                    act[0] = False
+                else:
+                    line[0] = step_towards(0, p0)
+                if pos[1] != p1:
+                    line[1] = step_towards(1, p1)
+                elif not act[1]:
+                    line[1] = 'T'
+                    act[1] = True
+                if line == ['-'] * 6:
+                    break
+                prog.append(line)
+            line = ['-'] * 6
+            line[0] = 'T'
+            act[0] = True
+            prog.append(line)
+            todo &= ~(1 << c)
+        copies += 1
+        cur_missing = S
+    prog.append(['T' if act[t] else '-' for t in range(6)])
+    return prog
+
+
+# ---------------------------------------------------------------- beam search
+
+
+def axis_combos(g, e, f, pe, ae, pf, af, phi_e, phi_f, lk):
+    """All 16 instruction pairs for the two emitters of one axis."""
+    P = g.P
+    res_e = []
+    for t, p0, a0, phi in ((e, pe, ae, phi_e), (f, pf, af, phi_f)):
+        rt = g.ray[t]
+        ra = g.reach[t]
+        ra2 = g.reach2[t]
+        lst = []
+        for o in OPTS:
+            if o == '-':
+                q, a = p0, a0
+            elif o == 'F':
+                q, a = (p0 + 1) % P, a0
+            elif o == 'B':
+                q, a = (p0 - 1) % P, a0
+            else:
+                q, a = p0, not a0
+            if a:
+                ls = (rt[(q - 1) % P], rt[q], rt[(q + 1) % P])
+            else:
+                ls = (rt[q],)
+            lst.append((o, q, a, rt[q] if a else 0, phi[q] + (0 if a else 1), ra[q] if a else rt[q], ls, ra2[q] if a else ra[q]))
+        res_e.append(lst)
+    res = []
+    for o1, q1, a1, m1, h1, r1, l1, s1 in res_e[0]:
+        for o2, q2, a2, m2, h2, r2, l2, s2 in res_e[1]:
+            pl = []
+            if r1 & r2:
+                for m in l1:
+                    if m and m in l2:
+                        v = lk.get(m)
+                        if v is not None:
+                            pl.append(v)
+            res.append((o1, o2, q1, a1, q2, a2, m1 | m2, m1 & m2, h1 + h2, r1 | r2, pl, s1 | s2))
+    return res
+
+
+def phi_table(g, t, missing):
+    """phi[p]: ring distance from p to the nearest useful position whose line has a missing cell."""
+    P = g.P
+    targets = [p for p, m in g.linepos[t] if m & missing]
+    rd = g.rd
+    if not targets:
+        return [0] * P
+    return [min(rd[p][q] for q in targets) for p in range(P)]
+
+
+def beam(g, S, K, k, W=8, stall_limit=None, wopp=16, wcov=64, tb=1, wk=None, maxk=4,
+         pos0=None, act0=None, target=False, maxdepth=None, wret=8, w2=0, sweep=None):
+    """Beam search over ticks. With target=True: find a closed walk from (pos0, act0) back to the
+    same configuration that submits one pattern on its last tick; returns None if none is found."""
+    P = g.P
+    nS = S.bit_count()
+    BIG = 1 << 24
+    if stall_limit is None:
+        stall_limit = 4 * g.R + 6
+    lk = {}
+    for t in range(3):
+        for p, lm in g.linepos[t]:
+            if (lm & K).bit_count() <= maxk and lm & S:
+                lk[lm] = (lm & K, lm & S)
+    if pos0 is None:
+        pos0 = tuple(t * g.R for t in range(6))
+        act0 = (False,) * 6
+    pos0 = tuple(pos0)
+    act0 = tuple(act0)
+    rd = g.rd
+    beamlist = [(0, pos0, act0, 0, 0, None, 0 if sweep else 2)]
+    if sweep:
+        sw_ax, sx, sx3 = sweep
+        sw_e, sw_f = AXES[sw_ax]
+        ix = {p: i for i, p in enumerate(sx)}
+        iend = len(sx) - 1
+
+        def stepto(cur, tgt):
+            d = (tgt - cur) % P
+            if d == 0:
+                return '-'
+            return 'F' if d <= P - d else 'B'
+    best_progress = 0
+    stall = 0
+    ticks = 0
+    cnt = 0
+    REL = S | K
+    wkk = wk or 0
+    while True:
+        heap = []
+        HW = 3 * W
+        thr = -1 << 62
+        for _, pos, act, M, copies, hist, sph in beamlist:
+            missing = S & ~M
+            phis = [phi_table(g, t, missing) for t in range(6)]
+            if target:
+                cov = nS - missing.bit_count()
+                for t in range(6):
+                    rt = rd[pos0[t]]
+                    ph = phis[t]
+                    phis[t] = [ph[q] + (wret * rt[q] * (cov + 1)) // (nS + 1) for q in range(P)]
+            ax = []
+            for i, (e, f) in enumerate(AXES):
+                ax.append(axis_combos(g, e, f, pos[e], act[e], pos[f], act[f], phis[e], phis[f], lk))
+            phmap = None
+            if sph < 2:
+                pe, pf = pos[sw_e], pos[sw_f]
+                phmap = {}
+                if sph == 0:
+                    if pe == sx[0] and pf == sx3[0]:
+                        phmap[('T', 'T')] = 2 if iend == 0 else 1
+                        phmap[('-', '-')] = 0
+                    else:
+                        phmap[(stepto(pe, sx[0]), stepto(pf, sx3[0]))] = 0
+                else:
+                    i = ix[pe]
+                    phmap[('-', '-')] = 1
+                    phmap[('T', 'T')] = 1
+                    if i < iend:
+                        phmap[(stepto(pe, sx[i + 1]), stepto(pf, sx3[i + 1]))] = 2 if i + 1 == iend else 1
+                ax[sw_ax] = [cmb for cmb in ax[sw_ax] if (cmb[0], cmb[1]) in phmap]
+            A, B, C = ax
+            base_cp = copies * BIG
+            for a in A:
+                a1, a2, aR, aL = a[6], a[7], a[9], a[10]
+                for b in B:
+                    b1, b2, bR = b[6], b[7], b[9]
+                    t1 = a1 | b1
+                    t2 = a2 | b2 | (a1 & b1)
+                    t3 = (a2 & b1) | (b2 & a1)
+                    hab = a[8] + b[8]
+                    RAB = aR & bR
+                    RAoB = aR | bR
+                    bL = b[10]
+                    RAB2 = a[11] & b[11]
+                    RAoB2 = a[11] | b[11]
+                    for c in C:
+                        c1, c2 = c[6], c[7]
+                        T3 = t3 | (t2 & c1) | (c2 & t1)
+                        C2 = (t2 | c2 | (t1 & c1)) & ~T3
+                        if C2 & K and wk is None:
+                            continue
+                        nM = (M | C2) & ~T3 & REL
+                        if nM == S:
+                            if target:
+                                npos = (a[2], b[2], c[2], a[4], b[4], c[4])
+                                nact = (a[3], b[3], c[3], a[5], b[5], c[5])
+                                if npos == pos0 and nact == act0:
+                                    return unwind(((a[0], b[0], c[0], a[1], b[1], c[1]), hist)), nact
+                                continue
+                            sc = base_cp + BIG
+                            nM = 0
+                            ncp = copies + 1
+                            opp = nS * (wopp + w2)
+                        else:
+                            ncp = copies
+                            sc = base_cp + (nM & S).bit_count() * wcov - (hab + c[8])
+                            if nM & K:
+                                sc -= (nM & K).bit_count() * wkk
+                            if sc + nS * (wopp + w2) <= thr:
+                                continue
+                            cR = c[9]
+                            ox = RAB | (RAoB & cR)
+                            if aL:
+                                ro = bR | cR
+                                for Kl, Sl in aL:
+                                    if not Kl & ~ro:
+                                        ox |= Sl
+                            if bL:
+                                ro = aR | cR
+                                for Kl, Sl in bL:
+                                    if not Kl & ~ro:
+                                        ox |= Sl
+                            if c[10]:
+                                for Kl, Sl in c[10]:
+                                    if not Kl & ~RAoB:
+                                        ox |= Sl
+                            mis = S & ~nM
+                            opp = (ox & mis).bit_count() * wopp
+                            if w2:
+                                opp += ((RAB2 | (RAoB2 & c[11])) & mis).bit_count() * w2
+                        sc += opp
+                        if sc <= thr:
+                            continue
+                        cnt += tb
+                        if phmap is None:
+                            nph = 2
+                        else:
+                            cmb = (a, b, c)[sw_ax]
+                            nph = phmap[(cmb[0], cmb[1])]
+                        item = (sc, cnt, (a[2], b[2], c[2], a[4], b[4], c[4]), (a[3], b[3], c[3], a[5], b[5], c[5]),
+                                nM, ncp, hist, (a[0], b[0], c[0], a[1], b[1], c[1]), nph)
+                        if len(heap) < HW:
+                            heapq.heappush(heap, item)
+                            if len(heap) == HW:
+                                thr = heap[0][0]
+                        else:
+                            heapq.heapreplace(heap, item)
+                            thr = heap[0][0]
+        ticks += 1
+        if target and (not heap or ticks >= maxdepth):
+            return None
+        heap.sort(reverse=True)
+        seen = set()
+        beamlist = []
+        for sc, _, npos, nact, nM, ncp, hist, line, nph in heap:
+            key = (npos, nact, nM, nph)
+            if key in seen:
+                continue
+            seen.add(key)
+            nh = (line, hist)
+            if ncp >= k:
+                return unwind(nh), nact
+            beamlist.append((sc, npos, nact, nM, ncp, nh, nph))
+            if len(beamlist) >= W:
+                break
+        if target:
+            continue
+        prog_val = max(e[4] * (nS + 1) + (e[3] & S).bit_count() - (e[3] & K).bit_count() for e in beamlist)
+        if prog_val > best_progress:
+            best_progress = prog_val
+            stall = 0
+        else:
+            stall += 1
+            if stall > stall_limit:
+                sc, pos, act, M, copies, hist, _ = beamlist[0]
+                prog = unwind(hist)
+                return fallback(g, S, K, k, pos, act, M, copies, prog), None
+
+
+def accept_points(g, S, K, prog):
+    """For each submission: (number of lines so far, positions, active flags)."""
+    pos = [t * g.R for t in range(6)]
+    act = [False] * 6
+    M = 0
+    P = g.P
+    res = []
+    for i, line in enumerate(prog):
+        for t in range(6):
+            ins = line[t]
+            if ins == 'F':
+                pos[t] = (pos[t] + 1) % P
+            elif ins == 'B':
+                pos[t] = (pos[t] - 1) % P
+            elif ins == 'T':
+                act[t] = not act[t]
+        t1 = t2 = t3 = 0
+        for t in range(6):
+            if act[t]:
+                m = g.ray[t][pos[t]]
+                t3 |= t2 & m
+                t2 |= t1 & m
+                t1 |= m
+        M = (M | (t2 & ~t3)) & ~t3
+        if M & S == S and not M & K:
+            M &= ~S
+            res.append((i + 1, tuple(pos), tuple(act)))
+    return res
+
+
+def unwind(h):
+    out = []
+    while h is not None:
+        out.append(list(h[0]))
+        h = h[1]
+    out.reverse()
+    return out
+
+
+def finish(prog, act):
+    if act is not None and any(act):
+        prog = prog + [['T' if x else '-' for x in act]]
+    return prog
+
+
+def make_program(g, S, K, k, **kw):
+    return finish(*beam(g, S, K, k, **kw))
+
+
+def valid(g, S, K, k, prog):
+    acc, act = simulate(g, S, K, prog)
+    return acc >= k and not any(act)
+
+
+VARIANTS = [dict(tb=-1), dict(wopp=16, w2=4), dict(tb=-1, wopp=8, w2=4), dict(wopp=8), dict(tb=-1, wopp=24),
+            dict(W=12, w2=2), dict(tb=-1, W=12, wopp=12), dict(wopp=20, wcov=48, w2=3), dict(tb=-1, wopp=10, wcov=80)]
+
+
+def solve(text, budget=100.0):
+    T0 = time.process_time()
+    cases = parse(text)
+    geos = {}
+    data = []
+    progs = []
+    for R, k, pat in cases:
+        g = geos.get(R)
+        if g is None:
+            g = geos[R] = Geo(R)
+        S, K = pattern_masks(g, pat)
+        data.append((g, S, K, k))
+        prog = make_program(g, S, K, k)
+        if not valid(g, S, K, k, prog):
+            prog = fallback(g, S, K, k, [t * R for t in range(6)], [False] * 6, 0, 0, [])
+        progs.append(prog)
+
+    def left():
+        return budget - (time.process_time() - T0)
+
+    # exact short cycles: one configuration held, or two alternating ones
+    for i, (g, S, K, k) in enumerate(data):
+        if k < 2 or left() < budget * 0.4:
+            break
+        pts = accept_points(g, S, K, progs[i])
+        gap = pts[1][0] - pts[0][0] if len(pts) > 1 else 99
+        if gap <= 1:
+            continue
+        cands, maxcov = cycle_search(g, S, K, k, static_only=True)
+        if gap >= 3 and 2 * maxcov >= S.bit_count() and g.R <= 6:
+            c2, _ = cycle_search(g, S, K, k, deadline=time.time() + min(2.0, max(0.1, left() - budget * 0.4)))
+            cands += c2
+        for cost, stat, first1, specs in cands:
+            if cost + 1 >= len(progs[i]):
+                continue
+            pr = cycle_program(g, S, K, k, stat, first1, specs)
+            if pr is not None and len(pr) < len(progs[i]) and valid(g, S, K, k, pr):
+                progs[i] = pr
+    # more beam searches with other settings while time remains
+    for kw in VARIANTS:
+        for i in sorted(range(len(data)), key=lambda j: -len(progs[j])):
+            if left() < 0:
+                break
+            g, S, K, k = data[i]
+            pr = make_program(g, S, K, k, **kw)
+            if len(pr) < len(progs[i]) and valid(g, S, K, k, pr):
+                progs[i] = pr
+    out = []
+    for prog in progs:
+        if out:
             out.append('')
-        for ins in prog:
-            out.append(' '.join(ins))
+        out.extend(' '.join(l) for l in prog)
+    return out
+
+
+# ---------------------------------------------------------------- short exact cycles
+
+
+def emitter_cycle_opts(g, t, useful, static_only=False):
+    """Two-phase behaviours of one emitter: (mask1, mask2, pos1, act1, pos2, act2)."""
+    start = t * g.R
+    P = g.P
+    lines = sorted(g.linepos[t], key=lambda pm: (pm[0] - start + P // 2) % P)
+    opts = [(0, 0, start, False, start, False)]
+    for i, (p, m) in enumerate(lines):
+        if m & useful:
+            opts.append((m, m, p, True, p, True))
+            if not static_only:
+                opts.append((m, 0, p, True, p, False))
+                opts.append((0, m, p, False, p, True))
+        if not static_only and i + 1 < len(lines):
+            q, m2 = lines[i + 1]
+            if (m | m2) & useful:
+                opts.append((m, m2, p, True, q, True))
+                opts.append((m2, m, q, True, p, True))
+    return opts
+
+
+def axis_cycle_sigs(g, e, f, useful, static_only=False):
+    rd = g.rd
+    se, sf = e * g.R, f * g.R
+    oe = emitter_cycle_opts(g, e, useful, static_only)
+    of = emitter_cycle_opts(g, f, useful, static_only)
+    sigs = {}
+    for x in oe:
+        de1, de2 = rd[se][x[2]], rd[se][x[4]]
+        for y in of:
+            key = (x[0] | y[0], x[0] & y[0], x[1] | y[1], x[1] & y[1])
+            c1 = max(de1, rd[sf][y[2]])
+            c2 = max(de2, rd[sf][y[4]])
+            cur = sigs.get(key)
+            if cur is None:
+                sigs[key] = [c1, (x, y), c2, (x, y)]
+            else:
+                if c1 < cur[0]:
+                    cur[0], cur[1] = c1, (x, y)
+                if c2 < cur[2]:
+                    cur[2], cur[3] = c2, (x, y)
+    return list(sigs.items())
+
+
+def cycle_search(g, S, K, k, static_only=False, deadline=None, keep=12):
+    """Pairs of configurations (X1, X2), one tick apart, whose 2-hit sets cover the pattern
+    without touching the skirt. Returns candidates (setup, phase, specs) sorted by setup."""
+    useful = S | K
+    axs = [axis_cycle_sigs(g, e, f, useful, static_only) for e, f in AXES]
+    order = sorted(range(3), key=lambda i: -len(axs[i]))
+    A, B, C = [axs[i] for i in order]
+    best = []
+    it = 0
+    maxcov = 0
+    for (a, ra) in A:
+        ao1, at1, ao2, at2 = a
+        for (b, rb) in B:
+            bo1, bt1, bo2, bt2 = b
+            ge1 = ao1 | bo1
+            ge2 = at1 | bt1 | (ao1 & bo1)
+            ge3 = (at1 & bo1) | (bt1 & ao1)
+            p0, p1, p2 = ~ge1, ge1 & ~ge2, ge2 & ~ge3
+            he1 = ao2 | bo2
+            he2 = at2 | bt2 | (ao2 & bo2)
+            he3 = (at2 & bo2) | (bt2 & ao2)
+            if ge3 & he3 & S:
+                continue
+            q0, q1, q2 = ~he1, he1 & ~he2, he2 & ~he3
+            it += 1
+            if deadline is not None and it & 255 == 0 and time.time() > deadline:
+                return finish_cands(best, order), maxcov
+            for (c, rc) in C:
+                co1, ct1, co2, ct2 = c
+                C2a = (p2 & ~co1) | (p1 & co1 & ~ct1) | (p0 & ct1)
+                if C2a & K:
+                    continue
+                C2b = (q2 & ~co2) | (q1 & co2 & ~ct2) | (q0 & ct2)
+                if C2b & K:
+                    continue
+                if static_only:
+                    cv = (C2a & S).bit_count()
+                    if cv > maxcov:
+                        maxcov = cv
+                if (C2a | C2b) & S != S:
+                    continue
+                stat = 1 if C2a & S == S else (2 if C2b & S == S else 0)
+                s1 = max(ra[0], rb[0], rc[0])
+                s2 = max(ra[2], rb[2], rc[2])
+                if stat:
+                    cost = (s1 if stat == 1 else s2) + k
+                else:
+                    cost = min(s1, s2) + 2 * k
+                item = (cost, stat, s1 <= s2, ra, rb, rc)
+                if len(best) < keep or item[0] < best[-1][0]:
+                    best.append(item)
+                    best.sort(key=lambda x: x[0])
+                    del best[keep:]
+    return finish_cands(best, order), maxcov
+
+
+def finish_cands(best, order):
+    out = []
+    for cost, stat, first1, ra, rb, rc in best:
+        reps = [None] * 3
+        reps[order[0]], reps[order[1]], reps[order[2]] = ra, rb, rc
+        specs = [None] * 6
+        for i, (e, f) in enumerate(AXES):
+            rep = reps[i][1] if (stat == 1 or (stat == 0 and first1)) else reps[i][3]
+            specs[e], specs[f] = rep
+        out.append((cost, stat, first1, specs))
+    return out
+
+
+def cycle_program(g, S, K, k, stat, first1, specs):
+    """Program: move to the first configuration, then alternate (or hold) until k submissions."""
+    P = g.P
+    X = [(sp[2], sp[3]) if (stat == 1 or (stat == 0 and first1)) else (sp[4], sp[5]) for sp in specs]
+    Y = [(sp[4], sp[5]) if (stat == 0 and first1) else (sp[2], sp[3]) for sp in specs]
+    if stat:
+        Y = X
+    pos = [t * g.R for t in range(6)]
+    prog = []
+    while True:
+        line = ['-'] * 6
+        for t in range(6):
+            d = (X[t][0] - pos[t]) % P
+            if d:
+                if d <= P - d:
+                    pos[t] = (pos[t] + 1) % P
+                    line[t] = 'F'
+                else:
+                    pos[t] = (pos[t] - 1) % P
+                    line[t] = 'B'
+        if line == ['-'] * 6:
+            break
+        prog.append(line)
+    prog.append(['T' if X[t][1] else '-' for t in range(6)])
+    cur, nxt = X, Y
+
+    def trans(a, b):
+        line = []
+        for t in range(6):
+            if a[t][1] != b[t][1]:
+                line.append('T')
+            elif a[t][0] == b[t][0]:
+                line.append('-')
+            elif (a[t][0] + 1) % P == b[t][0]:
+                line.append('F')
+            else:
+                line.append('B')
+        return line
+
+    fw, bw = trans(X, Y), trans(Y, X)
+    # simulate until k submissions
+    limit = len(prog) + 2 * k + 6
+    flip = True
+    while len(prog) < limit:
+        acc, _ = simulate(g, S, K, prog)
+        if acc >= k:
+            break
+        prog.append(fw if flip else bw)
+        flip = not flip
+    acc, act = simulate(g, S, K, prog)
+    if acc < k:
+        return None
+    return finish(prog, act)
+
+
+def emitter_moves(P, p, a):
+    """(instruction, new pos, new active) for one emitter."""
+    return (('-', p, a), ('F', (p + 1) % P, a), ('B', (p - 1) % P, a), ('T', p, not a))
+
+
+def hits(g, pos, act):
+    t1 = t2 = t3 = 0
+    for t in range(6):
+        if act[t]:
+            m = g.ray[t][pos[t]]
+            t3 |= t2 & m
+            t2 |= t1 & m
+            t1 |= m
+    return t2 & ~t3, t3
+
+
+def successors(g, K, pos, act):
+    """All K-safe one-tick successors: (line, pos, act, C2, C3)."""
+    P = g.P
+    per = []
+    for t in range(6):
+        lst = []
+        for ins, q, a in emitter_moves(P, pos[t], act[t]):
+            lst.append((ins, q, a, g.ray[t][q] if a else 0))
+        per.append(lst)
+    out = []
+    for e0 in per[0]:
+        for e3 in per[3]:
+            a1, a2 = e0[3] | e3[3], e0[3] & e3[3]
+            for e1 in per[1]:
+                for e4 in per[4]:
+                    b1, b2 = e1[3] | e4[3], e1[3] & e4[3]
+                    t1 = a1 | b1
+                    t2 = a2 | b2 | (a1 & b1)
+                    t3 = (a2 & b1) | (b2 & a1)
+                    for e2 in per[2]:
+                        for e5 in per[5]:
+                            c1, c2 = e2[3] | e5[3], e2[3] & e5[3]
+                            T3 = t3 | (t2 & c1) | (c2 & t1)
+                            C2 = (t2 | c2 | (t1 & c1)) & ~T3
+                            if C2 & K:
+                                continue
+                            out.append(((e0[0], e1[0], e2[0], e3[0], e4[0], e5[0]),
+                                        (e0[1], e1[1], e2[1], e3[1], e4[1], e5[1]),
+                                        (e0[2], e1[2], e2[2], e3[2], e4[2], e5[2]), C2, T3))
+    return out
+
+
+def step_ins(P, s, d):
+    """Instruction taking emitter state s=(p,a) to d, or None if not adjacent."""
+    if s == d:
+        return '-'
+    if s[1] == d[1]:
+        if (s[0] + 1) % P == d[0]:
+            return 'F'
+        if (s[0] - 1) % P == d[0]:
+            return 'B'
+        return None
+    if s[0] == d[0]:
+        return 'T'
+    return None
+
+
+def anchored_cycles(g, S, K, pos, act, pmax=3, deadline=None):
+    """Shortest closed walk X -> ... -> X (length 3) covering S, X = (pos, act). Returns lines or None."""
+    P = g.P
+    X = tuple(zip(pos, act))
+    C2X, C3X = hits(g, pos, act)
+    sx = successors(g, K, pos, act)
+    # per-emitter states adjacent to X (as predecessor)
+    predX = []
+    for t in range(6):
+        lst = []
+        for ins, q, a in emitter_moves(P, pos[t], act[t]):
+            lst.append((q, a))
+        predX.append(lst)
+    best = None
+    for line1, npos, nact, C2Y, C3Y in sx:
+        covY = ((C2Y & ~C3X) | C2X) & S  # coverage after Y, X order handled by simulation later
+        need = S & ~(C2Y | C2X)
+        if not need:
+            continue
+        # Z adjacent to Y and to X
+        cand = []
+        for t in range(6):
+            yz = (npos[t], nact[t])
+            lst = []
+            for q, a in predX[t]:
+                i1 = step_ins(P, yz, (q, a))
+                if i1 is None:
+                    continue
+                i2 = step_ins(P, (q, a), X[t])
+                if i2 is None:
+                    continue
+                lst.append((i1, i2, q, a, g.ray[t][q] if a else 0))
+            if not lst:
+                break
+            cand.append(lst)
+        else:
+            for z0 in cand[0]:
+                for z3 in cand[3]:
+                    a1, a2 = z0[4] | z3[4], z0[4] & z3[4]
+                    for z1 in cand[1]:
+                        for z4 in cand[4]:
+                            b1, b2 = z1[4] | z4[4], z1[4] & z4[4]
+                            t1 = a1 | b1
+                            t2 = a2 | b2 | (a1 & b1)
+                            t3 = (a2 & b1) | (b2 & a1)
+                            for z2 in cand[2]:
+                                for z5 in cand[5]:
+                                    c1, c2 = z2[4] | z5[4], z2[4] & z5[4]
+                                    T3 = t3 | (t2 & c1) | (c2 & t1)
+                                    C2 = (t2 | c2 | (t1 & c1)) & ~T3
+                                    if C2 & K or need & ~C2:
+                                        continue
+                                    zs = (z0, z1, z2, z3, z4, z5)
+                                    l2 = tuple(z[0] for z in zs)
+                                    l3 = tuple(z[1] for z in zs)
+                                    return [list(line1), list(l2), list(l3)]
+        if deadline is not None and time.time() > deadline:
+            return None
+    return None
+
+
+def sweep_specs(g, S, axis):
+    """For each sweep direction: positions of the pair emitters for every line from the first to
+    the last line holding pattern cells."""
+    e, f = AXES[axis]
+    P = g.P
+    start = e * g.R
+    le = sorted(g.linepos[e], key=lambda pm: (pm[0] - start + P // 2) % P)
+    posf = {m: p for p, m in g.linepos[f]}
+    seq = [(p, posf[m], m) for p, m in le]
+    idx = [i for i, (p, q, m) in enumerate(seq) if m & S]
+    if not idx:
+        return []
+    seq = seq[idx[0]:idx[-1] + 1]
+    out = []
+    for sq in (seq, seq[::-1]):
+        out.append((axis, [p for p, q, m in sq], [q for p, q, m in sq]))
     return out
