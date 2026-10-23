@@ -35,6 +35,8 @@ Geo G;
 vector<double> cellW;
 int HMODE = 0, PCAP = 0;
 double WD = 0.0, COPYW = -1;
+bool HAS_T = false;
+int TPOS[6], TACT;
 
 int ringdist(int a, int b) {
     int d = abs(a - b);
@@ -392,10 +394,23 @@ template <int NW> struct Solver {
                         child.copies++;
                         for (int k = 0; k < NW; k++) child.M.w[k] &= ~Pm.w[k];
                         if (child.copies >= CNT) {
+                            if (HAS_T) {
+                                bool ok = child.act == TACT;
+                                for (int q = 0; q < 6 && ok; q++) ok = child.pos[q] == TPOS[q];
+                                if (!ok) return;
+                            }
                             found = pi;
                             foundIns = ins;
                             return;
                         }
+                    }
+                    if (HAS_T) {
+                        int need = 0;
+                        for (int q = 0; q < 6; q++) {
+                            int d = ringdist(child.pos[q], TPOS[q]) + (((child.act ^ TACT) >> q) & 1);
+                            need = max(need, d);
+                        }
+                        if (depth + 1 + need > maxDepth) return;
                     }
                     double sc = evaluate(child) + (rng() & 1023) * 1e-4;
                     cands.push_back({sc, pi, ins});
@@ -542,6 +557,11 @@ int main(int argc, char** argv) {
         in >> R >> rows >> cols >> CNT;
         pat.assign(rows, "");
         for (auto& s : pat) in >> s;
+    }
+    if (getenv("CNTOVR")) CNT = atoi(getenv("CNTOVR"));
+    if (getenv("TARGET")) {
+        HAS_T = true;
+        sscanf(getenv("TARGET"), "%d,%d,%d,%d,%d,%d,%d", &TPOS[0], &TPOS[1], &TPOS[2], &TPOS[3], &TPOS[4], &TPOS[5], &TACT);
     }
     build();
     int nw = (NREL + 63) / 64;

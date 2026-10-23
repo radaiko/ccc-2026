@@ -37,7 +37,7 @@ def main():
                       capture_output=True, text=True, env=env).stdout.split('\n')
         return i, [l for l in out if l.strip() and l != 'NONE']
 
-    tb = tn = 0
+    tb = tn = raw = 0
     with ThreadPoolExecutor(int(os.environ.get('JOBS', 3))) as ex:
         for i, prog in ex.map(job, idxs):
             r, pat, count = cs[i]
@@ -46,6 +46,7 @@ def main():
             old = len(best[i])
             tb += old
             tn += min(n, len(best[i]))
+            raw += n if ok else 2 * old
             mark = ''
             if ok and n < len(best[i]):
                 mark = ' IMPROVED'
@@ -53,7 +54,7 @@ def main():
                     best[i] = prog
                     save_best(name, best)
             print('%d: best %d got %s%s' % (i, old, n if ok else 'FAIL', mark), flush=True)
-    print('SUM best %d  min(best,new) %d' % (tb, tn), flush=True)
+    print('SUM best %d  min(best,new) %d  raw %d' % (tb, tn, raw), flush=True)
 
 
 if __name__ == '__main__':
