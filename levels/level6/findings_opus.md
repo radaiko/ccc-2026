@@ -35,3 +35,8 @@
   Even if every 3+ pattern reached 2 lines/copy medium would only save ~1550.
 - `opus/total.py` merges every run dir + output/, re-verifies by simulation and rewrites output/ when better.
 - [large agent] beam halo weight WH=3 is far too low on large: the beam paints halo and then needs 1 tick per halo erasure (tails of 100+ ticks, often NONE). WH=100 (practically forbid halo) at width 300 FROM SCRATCH beat the merged best on a 12-pattern sample of the most expensive patterns (1168 vs 1237); full large pass with WH=100 w=300: 5351 -> 5274.
+- [enormous agent] With WH=3 the beam paints halo early and then never cleans it (no guidance towards dirty halo):
+  width 300 returned NONE on many enormous patterns (also thin paths like #2). WH=100 (`beam .. 100 1 0.3 0.5`,
+  halo effectively forbidden) full pass at width 300: enormous 5371 -> 5039.
+- [enormous agent] Count-2 patterns: copy 2 = copy-1 emitter configurations replayed backwards (F<->B, T<->T,
+  candidates/opus/rev_e.py) is often valid and drops copy 1's leading travel ticks: -38 then -4 lines on enormous.

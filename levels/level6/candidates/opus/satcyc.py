@@ -367,21 +367,20 @@ def auto(r, pat, count, best, tmo, kmin=1, mmax=3):
                 if len(cyc_opts) >= 2:
                     break
     for K, m in cyc_opts:
-        T0 = flo
-        while True:
+        # rest length of a (K,m) cycle is only known after solving: go downward from the largest useful T0
+        cur = len(bestprog) if bestprog else B
+        rest_lo = 0 if count == 1 else ((count - 1) // m) * K - (K - 1)
+        T0 = min(f + 2, cur - 1 - rest_lo)
+        while T0 >= max(flo, 1):
             cur = len(bestprog) if bestprog else B
-            if T0 + ((count - 1) // m) * K - (K - 1) >= cur and count > 1:
-                break
-            if count == 1 and T0 >= cur:
-                break
             res = prog_with_prefix(r, pat, count, K, m, T0, tmo)
             log('prog K=%d m=%d T0=%d: %s' % (K, m, T0, 'UNSAT' if res is None else res if res == 'unknown'
                                                  else 'len %d' % len(res)))
-            if res is not None and res != 'unknown':
-                if len(res) < cur:
-                    bestprog = res
+            if res is None or res == 'unknown':
                 break
-            T0 += 1
+            if len(res) < cur:
+                bestprog = res
+            T0 -= 1
     return bestprog
 
 
