@@ -169,3 +169,4 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
   3 free 12 s, 4 free 25 s, 5-6 free or positions-free unknown at 120-300 s.
 - [medium agent] 197: 2-copy cycle with fixed copy lengths (7,8) (satq.py 197:15:2:at=7,15, SAT in 448 s)
   -> 65 -> 61. Fixing the submission ticks of a multi-copy cycle makes these big-pattern queries solvable.
+- [large agent] Enormous, shortest programs first (11-36 lines): resuf_e.py + beam_e4 (HFORBID=1, w 100,1,0.3,0.25, width 2000). Cuts d4..d14,s0 seed 1: 4650 -> 4553. Then cut t1 (a complete re-beam) with seeds 2,3 gave another -36 (4549 -> 4513). On short programs a full re-beam with new seeds is the most productive move. Programs of 33-41 lines gained little (-4), the enormous agent had already covered them.
