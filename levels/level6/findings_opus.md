@@ -79,3 +79,6 @@
   6-tick cycle with 2 submissions (3+3) is SAT in ~2 s -> 142 54 -> 44, 105 26 -> 23; 28 K=9 m=2 57 -> 56
   (satcyc.py cycle K m; satscan.py scans (K,m<=3) below the current rate, satbuild.py builds SAT prefix + cycle).
   Segment re-solve also gave 132 54 -> 51, 130 79 -> 76.
+- [medium agent] 28: free (K,m) scan found K=13 m=3 then K=8 m=2 (two 4-tick copies; periodic 4 is UNSAT) ->
+  57 -> 50; 11/3 and 7/2 UNSAT. Seg re-solve pass over the 41 gap patterns saved 10 more (203, 186, 107 -1).
+  Medium 5820.
