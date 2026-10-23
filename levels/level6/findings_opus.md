@@ -187,3 +187,4 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
   190 (3.5); all other patterns of my half are at proven-optimal repeat rate.
 - [medium-cycles agent] Final 2-free-emitter scans also all UNSAT: 203/138/180/133/171/28 (7,2), 30/182 (9,2),
   132 (15,2). Found cycles that beat a rate are appended to runs/opus/cycles_2-medium.jsonl (anchor + lines).
+- [large agent 2] Passes 3-6 (l2_resuf.py with BOUNCE=1: every beam output is also bounce-post-processed; seeds 2-5, cuts c-1..c-6, d3..d14, top 15-50 longest): 4940 -> 4916; the last pass (top 15, seed 5) found nothing, the big programs are saturating at width 2000. Large total 5194 -> 4916 in this session.
