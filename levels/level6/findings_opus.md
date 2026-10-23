@@ -34,3 +34,4 @@
 - Medium copies by current per-copy cost: 99 at 1, 915 at 2, 464 at 3, 146 at 4, 152 at 5, 59 at 6+.
   Even if every 3+ pattern reached 2 lines/copy medium would only save ~1550.
 - `opus/total.py` merges every run dir + output/, re-verifies by simulation and rewrites output/ when better.
+- [large agent] beam halo weight WH=3 is far too low on large: the beam paints halo and then needs 1 tick per halo erasure (tails of 100+ ticks, often NONE). WH=100 (practically forbid halo) at width 300 FROM SCRATCH beat the merged best on a 12-pattern sample of the most expensive patterns (1168 vs 1237); full large pass with WH=100 w=300: 5351 -> 5274.
