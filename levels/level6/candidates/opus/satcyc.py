@@ -275,7 +275,9 @@ def build_cycle(md, K, m=1, start=None):
     at least m submissions in total."""
     cs = [md.config() for _ in range(K)]
     for t in range(K):
-        md.trans(start if (start is not None and t == 0) else cs[t - 1], cs[t])
+        if start is not None and t == 0:
+            continue  # free start: the first config is arbitrary (any config is one step from some config)
+        md.trans(cs[t - 1], cs[t])
     M = None
     Ss = []
     for t in range(K):
@@ -288,13 +290,13 @@ def build_cycle(md, K, m=1, start=None):
 
 def cycle_only(r, pat, K, m=1, timeout_ms=0, free=False, want_cfg=False):
     md = Model(r, pat)
-    st = md.config() if free else None
+    st = 'free' if free else None
     cs, Ss = build_cycle(md, K, m, st)
     res = z3sat.solve(md.nv, md.cl, timeout_ms)
     if res is None or res == 'unknown':
         return res
     cfg = [md.decode(res, c) for c in cs]
-    first = md.decode(res, st) if free else cfg[-1]
+    first = cfg[0] if free else cfg[-1]
     if want_cfg:
         return cfg, [t for t in range(K) if Ss[t] in res]
     return lines_between([first] + cfg)

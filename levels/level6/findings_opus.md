@@ -61,3 +61,4 @@
 - Waste profile of the best programs at total 15,936 (scratchpad waste.py): ticks spent on the last 10% of each
   copy's cells: medium 343 / large 815 (16%) / enormous 1054 (22%); one-cell ticks 598 / 651 / 710; start travel
   102 / 157 / 121. Medium's gap is structural (cycle length, proven floor 4895); large/enormous lose most in tails.
+- [large agent, medium run-ins] runin.py: exact SAT (satcyc Model) check "any submission at a tick < f" (f = current first submission tick, one query with OR over all submission vars). On the 169 medium patterns with optimal repeat rate: 158 are UNSAT => their programs are provably optimal (first copy at minimum tick, repeats at the floor). For the other 11, exact joint SAT (prefix of T0 ticks with >= j copies ending in the config that closes a (K,m) cycle, j<=2, m<=2) improved 9 patterns by 1 line each (72, 20, 4, 191, 131, 114, 83, 55, 11): medium -9. 106 and 33 can submit earlier but no cycle entry found (j<=5, m<=3).
