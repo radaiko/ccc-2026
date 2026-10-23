@@ -155,3 +155,8 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
   (kept the old builds). Oversubscription + 600 s job timeouts wastes CPU: keep heavy processes <= ~10 in total.
 - [large agent 2] resuffix with beam_e.cpp (built as beam_l2), HFORBID=1, width 2000, weights 100 1 0.3 0.25, longest first: pass 1 cuts d4,d7,d10,d14,s0 (all 190) 5194 -> 5053; pass 2 (l2_resuf.py, new cut cK = every submission tick + K) c-3,c-6,c0,d5,d9,d18 on the 80 longest + bounce -> large 4946. Cuts inside copy 1 of count-6 patterns gave the biggest single wins (141, 64: -6 each).
 - [large agent 2] Exact SAT on large is only useful for small walks: fixed-junction copy windows (l2_win.py) of 172 are UNSAT up to 14 ticks (beam copies are locally optimal for their junctions); palindromic walks (l2_palsat.py, matter model) and clean-coverage walks/cycles (l2_covsat.py) time out (UNKNOWN at 60-120 s) for n >= 7 on r=7/8.
+- [enormous agent] PITFALL: in zsh `env $cfg prog` with cfg="A=1 B=2" does NOT word-split: it sets A="1 B=2" and
+  leaves B unset. My first WTS/TAILV/HALOT shell sweeps were therefore wrong; use `export A=1 B=2` or ${=cfg}.
+- [enormous agent] Tail term works with WH=100: resuffix from the line where each copy reaches 85% / 92% of its
+  cells (resuf_e.py cuts p0.85,p0.92), width 2000, top-40 programs (138 cuts): sum(new-best) WTM=0 -7 (26 wins),
+  WTM=1 -71 (47 wins), WTM=2 -93 (53 wins), WTM=4 -7 (8 fails), WTM=6 +120.
