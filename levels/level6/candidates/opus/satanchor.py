@@ -13,7 +13,8 @@ def offs(r, e, p):
     return (p - e * r + 3 * r) % (6 * r) - 3 * r
 
 
-def anchored(r, pat, K, m, anchor, tmo):
+def anchored(r, pat, K, m, anchor, tmo, rad=0, freeact=False, want_cfg=False):
+    """rad > 0: the anchor may lie within +-rad rail steps per emitter (freeact: any on/off state)."""
     pos, am = anchor
     md = satcyc.Model(r, pat)
     md.sym = False
@@ -23,13 +24,19 @@ def anchored(r, pat, K, m, anchor, tmo):
     cs, Ss = satcyc.build_cycle(md, K, m)
     for e in range(6):
         p, a = cs[-1][e]
-        md.add([p[md.offs.index(off[e])]])
-        md.add([a if am >> e & 1 else -a])
+        md.add([p[md.offs.index(o)] for o in range(off[e] - rad, off[e] + rad + 1) if -r <= o <= r])
+        if not freeact:
+            md.add([a if am >> e & 1 else -a])
     res = z3sat.solve(md.nv, md.cl, tmo)
     if res is None or res == 'unknown':
         return res
     cfg = [md.decode(res, c) for c in cs]
-    return satcyc.lines_between([cfg[-1]] + cfg)
+    lines = satcyc.lines_between([cfg[-1]] + cfg)
+    if want_cfg:
+        anc = (tuple((e * r + o) % (6 * r) for e, (o, a) in enumerate(cfg[-1])),
+               sum(1 << e for e, (o, a) in enumerate(cfg[-1]) if a))
+        return lines, anc
+    return lines
 
 
 def main():
