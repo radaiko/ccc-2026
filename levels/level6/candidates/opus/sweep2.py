@@ -7,7 +7,7 @@ import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
-from harness import HERE, LEVEL, cases, load_best, save_best, valid
+from harness import HERE, LEVEL, cases, load_best, save_best, valid, run_job
 
 
 def main():
@@ -32,13 +32,13 @@ def main():
 
     def job(arg):
         i, a, rv = arg
-        out = subprocess.run([str(HERE / 'sweepdp'), str(inp), str(i), str(a), str(rv), '3', copies],
+        out = run_job([str(HERE / 'sweepdp'), str(inp), str(i), str(a), str(rv), '3', copies],
                              capture_output=True, text=True).stdout.split('\n')
         sched = [l.replace(' ', '') for l in out[1:] if l.strip()]
         path = os.path.join(tmp, '%d_%d_%d.txt' % (i, a, rv))
         with open(path, 'w') as f:
             f.write('\n'.join(sched) + '\n')
-        res = subprocess.run([str(HERE / 'beam'), str(inp), str(i), width, '1', '3', '1', '0.3', '0.5', '600', path],
+        res = run_job([str(HERE / 'beam'), str(inp), str(i), width, '1', '3', '1', '0.3', '0.5', '600', path],
                              capture_output=True, text=True).stdout.split('\n')
         return i, out[0], [l for l in res if l.strip() and l != 'NONE']
 

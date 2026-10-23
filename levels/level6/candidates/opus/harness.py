@@ -18,6 +18,18 @@ sys.path.insert(0, str(LEVEL.parents[1]))
 from levels.level6.candidates.astra import cases, simulate  # noqa: E402
 
 RUNS = LEVEL / 'runs' / 'opus'
+# Hard wall-clock limit per worker process (seconds); a job that exceeds it is killed and skipped.
+JOB_TIMEOUT = float(os.environ.get('JOB_TIMEOUT', '600'))
+
+
+def run_job(cmd, **kw):
+    """subprocess.run with the job timeout; returns empty stdout when the job was killed."""
+    limit = kw.pop('timeout', JOB_TIMEOUT)
+    try:
+        return subprocess.run(cmd, timeout=limit, **kw)
+    except subprocess.TimeoutExpired:
+        print('TIMEOUT (killed after %.0fs): %s' % (limit, ' '.join(map(str, cmd[:4]))), flush=True)
+        return subprocess.CompletedProcess(cmd, -9, stdout='', stderr='')
 RUNS.mkdir(parents=True, exist_ok=True)
 
 
@@ -86,7 +98,7 @@ def main():
 
     def job(i):
         bound = [str(len(best[i]))] if binary == 'cycle' else []
-        out = subprocess.run([str(HERE / binary), str(inp), str(i), width, seed] + extra + bound,
+        out = run_job([str(HERE / binary), str(inp), str(i), width, seed] + extra + bound,
                              capture_output=True, text=True).stdout.split('\n')
         prog = [l for l in out if l.strip() and l != 'NONE']
         return i, prog

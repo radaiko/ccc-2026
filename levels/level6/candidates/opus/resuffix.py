@@ -8,7 +8,7 @@ import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
-from harness import HERE, LEVEL, cases, load_best, save_best, valid
+from harness import HERE, LEVEL, cases, load_best, save_best, valid, run_job
 
 
 def main():
@@ -41,7 +41,7 @@ def main():
     def job(arg):
         i, t, path, L = arg
         env = dict(os.environ, PREFIX=path)
-        out = subprocess.run([str(HERE / 'beam_p'), str(inp), str(i), width, '1', '3', '1', '0.3', '0.5', str(L - t)],
+        out = run_job([str(HERE / 'beam_p'), str(inp), str(i), width, '1', '3', '1', '0.3', '0.5', str(L - t)],
                              capture_output=True, text=True, env=env).stdout.split('\n')
         return i, t, [l for l in out if l.strip() and l != 'NONE']
 

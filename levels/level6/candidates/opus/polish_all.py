@@ -4,7 +4,7 @@ import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from harness import HERE, LEVEL, cases, load_best, save_best, valid
+from harness import HERE, LEVEL, cases, load_best, save_best, valid, run_job
 
 name = sys.argv[1]
 seed = sys.argv[2] if len(sys.argv) > 2 else '1'
@@ -16,7 +16,7 @@ before = sum(map(len, best))
 
 
 def job(i):
-    out = subprocess.run([str(HERE / 'polish'), str(inp), str(i), seed, window], input='\n'.join(best[i]) + '\n',
+    out = run_job([str(HERE / 'polish'), str(inp), str(i), seed, window], input='\n'.join(best[i]) + '\n',
                          capture_output=True, text=True).stdout
     return i, [l for l in out.split('\n') if l.strip()]
 

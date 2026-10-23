@@ -7,7 +7,7 @@ import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
-from harness import HERE, LEVEL, cases, load_best, save_best, valid
+from harness import HERE, LEVEL, cases, load_best, save_best, valid, run_job
 sys.path.insert(0, str(LEVEL.parents[1]))
 from levels.level6.candidates.astra import DIRS, ring  # noqa: E402
 
@@ -85,7 +85,7 @@ def main():
 
     def job(arg):
         i, path = arg
-        out = subprocess.run([str(HERE / 'beam'), str(inp), str(i), width, '1'] + weights + ['400', path],
+        out = run_job([str(HERE / 'beam'), str(inp), str(i), width, '1'] + weights + ['400', path],
                              capture_output=True, text=True).stdout.split('\n')
         return i, [l for l in out if l.strip() and l != 'NONE']
 
