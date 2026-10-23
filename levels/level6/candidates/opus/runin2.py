@@ -136,10 +136,10 @@ def work(i, r, pat, count, B, tmo):
             T0 -= 1
     if cyc and os.environ.get('JOINT', '1') == '1':
         j, m, P = cyc
-        for q in range(1, int(os.environ.get('JQ', '2')) + 1):
+        for q in range(1, min(count, int(os.environ.get('JQ', '2'))) + 1):
             cur = len(bestp) if bestp else L
             # T0 + (count - q) copies at rate P/m must beat cur
-            hi = cur - 1 - ((count - q) * P + m - 1) // m + (P - 1)
+            hi = cur - 1 - ((count - q) * P) // m
             for T0 in range(min(hi, TMAXS), q - 1, -1):
                 p = joint(r, pat, count, P, m, T0, q, tmo)
                 if p == 'unknown':

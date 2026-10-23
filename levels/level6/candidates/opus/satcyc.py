@@ -580,7 +580,7 @@ def prefix_opt(r, pat, count, best, tmo, jmax=3):
 def segment(r, pat, Za, Zb, T, nsub, timeout_ms=0):
     """T lines from config Za (empty matter) to config Zb with a submission on the last line and >= nsub
     submissions in total. Returns lines / None / 'unknown'."""
-    span = max(abs(o) for o, a in list(Za) + list(Zb))
+    span = max(abs(o) for o, a in list(Za) + list(Zb or []))
     md = Model(r, pat, span)
 
     def fix(cfg, Z):
@@ -592,7 +592,8 @@ def segment(r, pat, Za, Zb, T, nsub, timeout_ms=0):
     st = md.config()
     fix(st, Za)
     cs = [md.config() for _ in range(T)]
-    fix(cs[-1], Zb)
+    if Zb is not None:
+        fix(cs[-1], Zb)
     prev = st
     M = None
     Ss = []
@@ -628,7 +629,7 @@ def segopt(r, pat, count, best, tmo, jmax=2, maxseg=40):
             for j in range(i + 1, min(len(bounds), i + jmax + 1)):
                 a, b = bounds[i], bounds[j]
                 Za = tuple(start) if a < 0 else tuple(cfgs[a])
-                Zb = tuple(cfgs[b])
+                Zb = tuple(cfgs[b]) if j < len(bounds) - 1 else None  # last submission: end is free
                 key = (Za, Zb, j - i, tuple(prog[a + 1:b + 1]))
                 if key in tried:
                     continue
@@ -636,7 +637,7 @@ def segopt(r, pat, count, best, tmo, jmax=2, maxseg=40):
                 # value: how often this exact segment occurs
                 occ = sum(1 for x in range(len(bounds)) for y in (x + j - i,) if y < len(bounds) and
                           (tuple(start) if bounds[x] < 0 else tuple(cfgs[bounds[x]])) == Za and
-                          tuple(cfgs[bounds[y]]) == Zb and
+                          (Zb is None or tuple(cfgs[bounds[y]]) == Zb) and
                           tuple(prog[bounds[x] + 1:bounds[y] + 1]) == key[3])
                 segs.append((-occ, b - a, i, j, a, b, Za, Zb))
         segs.sort()
