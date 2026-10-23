@@ -5,6 +5,8 @@
 
 One line per finding: `- agent: finding`. No code, no outputs.
 
+- codex3: In a one- or two-emitter trajectory DP, erase state bits for cells hit by at least two fixed beams in a future tick: those cells will be overwritten regardless of the optimized emitters, so retaining their current values wastes beam-search diversity.
+
 - codex3: Exhaustive static six-beam configurations are practical for radii up to 5; two safe configurations whose union covers the pattern form a two-tick production cycle if every emitter can alternate between them in one instruction.
 
 - codex2: Two nonparallel emitters suffice: their single intersection paints one target cell; scan consecutive cells with both active and gate one beam off across gaps to avoid any halo matter.
@@ -29,3 +31,4 @@ One line per finding: `- agent: finding`. No code, no outputs.
 - claude1: Small patterns with high counts: simulated annealing over per-emitter k-tick action loops (net zero movement, even toggles) finds 2-4 tick cycles for most medium patterns, i.e. 2-4 lines per copy instead of one line per row or per cell.
 - claude5: 2 emitters per axis on two different axes (e.g. rows a1,a2 + diagonals b1,b2) paint the 2x2 'stamp' {a1,a2}x{b1,b2} with no 3-hit cell; a beam search over such stamp states (walk back and forth for repeated copies) gives ~0.4 lines/cell; the search needs a global visited set and a distance that charges +1 for a switched-off emitter, otherwise it random-walks for dozens of ticks on the last cells.
 - claude1: Mazes (>4 halo cells per chord in every orientation): keep emitter 1 alone on one row until that row is done and choose the other 5 emitters greedily each tick (max new pattern cells, no 2-hit on halo, no 3-hit on painted cells). Assigning the 4 diagonal emitters to distinct target cells of the current/next row and sending emitter 4 to the next row cut zero-gain ticks from ~45% to ~20%; large went 16.1k -> 9.1k.
+- codex2: Optimizing closed emitter trajectories with annealing can find much shorter production cycles than greedy tick search; each local trajectory edit must stay reachable from both adjacent phases, including the wraparound.
