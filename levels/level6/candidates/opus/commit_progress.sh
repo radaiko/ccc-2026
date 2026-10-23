@@ -14,8 +14,11 @@ with open(os.path.join(wt, '..', '.commit.pylock'), 'w') as lock:
     os.makedirs(os.path.join(wt, 'levels/level6/candidates/opus'), exist_ok=True)
     os.makedirs(os.path.join(wt, 'levels/level6/output'), exist_ok=True)
     for f in glob.glob(os.path.join(src, 'levels/level6/candidates/opus/*')):
-        if f.endswith(('.cpp', '.py', '.sh')):
+        if f.endswith(('.cpp', '.py', '.sh', '.md', '.h')):
             shutil.copy(f, os.path.join(wt, 'levels/level6/candidates/opus/'))
+    os.makedirs(os.path.join(wt, 'levels/level6/candidates/opus/tools'), exist_ok=True)
+    for f in glob.glob(os.path.join(src, 'levels/level6/candidates/opus/tools/*')):
+        shutil.copy(f, os.path.join(wt, 'levels/level6/candidates/opus/tools/'))
     for f in ['levels/level6/findings_opus.md', 'levels/level6/findigs_astra.md']:
         if os.path.exists(os.path.join(src, f)):
             shutil.copy(os.path.join(src, f), os.path.join(wt, f))

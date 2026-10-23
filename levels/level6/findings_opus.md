@@ -175,3 +175,6 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
 - [medium-cycles agent] `opus/satscan2.py`: anchor-neighbourhood SAT (4 emitters of a base anchor fixed, 2 or 3
   emitters fully free, ~1-12 s/query): all UNSAT for 50 (10,2) 2- and 3-free, 35 (9,2), 119 (8,2), 144 (9,2),
   80 (7,2) around every submission config of the bests -> those rates look locally optimal.
+- Branch level6-findings-astra-opus is shared with another team's agent, which pushes to levels/level6/output2/.
+  opus total.py/load_best merge output2 per pattern (simulated before trusted), so output/ = best of both teams;
+  findings *.md files merge as union, and the commit script never leaves the worktree mid-rebase.
