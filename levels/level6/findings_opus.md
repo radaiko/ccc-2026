@@ -1,5 +1,63 @@
 # Level 6 findings (opus)
 
+## START HERE: optimisation playbook (read this first on a new laptop)
+
+Score convention: programs do NOT switch emitters off at the end (official sandbox only counts submissions;
+levels/level6/validator.py's "all off" check is a team assumption). Lower total lines = better.
+Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enormous 4723, small 110).
+
+### Setup and CPU (do this before any search)
+1. Code: branch `level6-findings-astra-opus`, dir levels/level6/candidates/opus/ (AGENT_BRIEF.md = tool reference).
+   Build every C++ tool with `clang++ -O3 -march=native -std=c++17`. For the main beam (beam_e.cpp) add PGO:
+   `-fprofile-instr-generate` build -> run 3 typical patterns (one per input) with LLVM_PROFILE_FILE=x.profraw ->
+   `xcrun llvm-profdata merge -output=b.profdata *.profraw` -> rebuild with `-flto -fprofile-instr-use=b.profdata`.
+   Identical output, ~14% less CPU. Always A/B-test it: the same recipe made beam_l2/beamL ~15% slower.
+2. Count your cores (`sysctl hw.perflevel0.physicalcpu hw.perflevel1.physicalcpu`; M5 = 4 performance + 6
+   efficiency). Total heavy processes across ALL agents <= core count. Oversubscription (load 23 on 10 cores) plus
+   job timeouts kills half-finished searches and wastes CPU. Use JOBS=<n> and harness.run_job (JOB_TIMEOUT=600).
+3. Result store: harness.save_best merges per-pattern minima under a file lock (any number of writers); total.py
+   re-verifies everything by simulation and rewrites levels/level6/output/; sync_loop.py fetches, merges, commits
+   and pushes every 5 min. Save every improvement immediately, never only at the end of a batch.
+
+### What to run, in order of payoff
+1. Beam search from scratch (beam_e.cpp, env HFORBID=1 = skip children that paint halo, 2-2.5x faster):
+   weights `WH W1 W2 WL = 100 1 0.3 0.25`. WH=3 is a trap: the beam paints halo and then needs 1 tick per halo cell
+   to erase it (or never finishes). Width 300-600 on large/enormous, 3000 on medium. On large add env WTM=1
+   (tail term: 2nd-nearest emitter distance to the hardest missing cell) - removes stalls/NONE results.
+   Beam scoring backbone: copies*big + 4*|P present| - WH*|halo with matter| + pairs-of-emitters-within-1/2-ticks
+   potential + WL*(sum over 6 emitters of distance to the nearest line through a missing cell).
+2. Suffix re-optimisation (resuf_e.py / resuffixL.py / l2_resuf.py): replay the first t lines of the best program,
+   re-run a WIDE beam (2000) from that exact state, splice if shorter. Cuts d4,d7,d10,d14 (lines before end), s0
+   (right after a submission), p0.85/p0.92 (where 85/92% of the copy's cells exist). Longest programs first.
+   Biggest single lever on large/enormous (-200..-300 per pass): 16-22% of their lines are spent on the last 10%
+   of each copy's cells (scratchpad waste.py measures this).
+3. Multi-copy (count >= 2), cheap, run after every change: rev_e.py (copy k+1 = copy k's configurations replayed
+   backwards; drops the start travel) and l2_bounce.py (walk the program's own config path back and forth,
+   turning at submissions; per copy = cheapest copy segment).
+4. Repeats (medium, and any high count). Key fact: after a submission pattern+halo are empty, so the state is the
+   emitter configuration alone and repeats are closed cycles. Tools, cheapest first:
+   - cyc2.cpp: exhaustive static / 2-tick copies (r<=5 in seconds). Any valid 2-tick copy is automatically a
+     period-2 cycle (moves are reversible), so NONE proves >= 3 lines per copy.
+   - satcyc.py (Z3 SAT core): `cycle K m` = K-line cycle with m submissions (MULTI-copy cycles beat periodic ones:
+     142 had no periodic 3-cycle but a 6-tick 2-copy cycle, 54 -> 44); `seg` = re-solve the segment between two
+     submissions with both ends fixed (~1 s); `prog` = shortest prefix into a cycle. satscan.py scans (K, m<=3)
+     below the current rate, satscan2.py proves per-copy lower bounds, satbuild.py builds prefix + cycle.
+   - satanchor.py / satauto.py: pin the cycle's end to a submission config of the best program: ~20 s where the
+     free version is still 'unknown' after 120 s.
+   - retbeam.cpp / retauto.py: beam that must return to its anchor config after NC copies (NC=2/3 find what NC=1
+     cannot), plus run-ins into the cycle (`--kplus 1 --runin 6`).
+   - runin.py: exact SAT "can any submission happen before tick f?" proves first copies optimal.
+5. Skip (measured, not worth it): row sweep with DP-planned punchers (sweepdp), line-deletion polish, cycle SA for
+   K>=5 (finds nothing the beams have not), plain wider beams with WH=3, tail terms together with WH=3.
+
+### Floors and proofs (do not spend time below these)
+- Medium: 92/210 patterns provably need >= 3 lines per repeat copy; repeat floor 4391, first-copy floor 504 ->
+  medium >= ~4895 even in theory. 169 patterns are proven optimal (exact SAT). Repeat rate proven optimal for
+  31, 187, 184, 182, 124, 49, 130, 158, 26, 59 (5/copy) and 107, 207, 77, 192 (4/copy).
+- Large / enormous: no tight floor known; their waste is in tails, see payoff item 2.
+
+## Detailed log
+
 - All current team "best" outputs (runs/best, astra, compact, ...) leave emitters ACTIVE at the end, so
   `levels/level6/validator.py` (assumption: all emitters off) rejects them. The official sandbox only counts
   submissions. Scores below follow the same convention (no final toggle-off line).
