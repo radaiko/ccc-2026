@@ -24,7 +24,7 @@ def total():
 
 seen_remote = sh(['git', '-C', str(REPO), 'rev-parse', 'origin/main']).stdout.strip()
 last_commit_total, _ = total()
-last_reported = last_commit_total
+last_reported = int(sys.argv[3]) if len(sys.argv) > 3 else last_commit_total
 print('SYNC start total %s' % last_commit_total, flush=True)
 while True:
     time.sleep(interval)
@@ -41,14 +41,15 @@ while True:
                 len(log.splitlines()), '; '.join(log.splitlines()[:3]), ' || '.join(added)[:1500]), flush=True)
             seen_remote = head
         t, out = total()
-        if t is not None and t != last_commit_total:
-            r = sh([str(HERE / 'commit_progress.sh'), 'Level 6: merged total %d (auto-sync)' % t], cwd=HERE)
-            last_commit_total = t
-            if last_reported - t >= step:
-                parts = ', '.join(l for l in out.splitlines() if l[:1].isdigit())
-                print('TOTAL %d (%s) %s' % (t, parts, r.stdout.strip()), flush=True)
-                last_reported = t
-            elif 'FAILED' in r.stdout:
-                print('PUSH FAILED at total %d' % t, flush=True)
+        # commit every round (no-op when nothing changed): code and findings get pushed too
+        msg = 'Level 6: merged total %d (auto-sync)' % t if t != last_commit_total else 'Level 6: code/findings (auto-sync)'
+        r = sh([str(HERE / 'commit_progress.sh'), msg], cwd=HERE)
+        if 'FAILED' in r.stdout:
+            print('PUSH FAILED at total %s' % t, flush=True)
+        last_commit_total = t
+        if t is not None and last_reported - t >= step:
+            parts = ', '.join(l for l in out.splitlines() if l[:1].isdigit())
+            print('TOTAL %d (%s) %s' % (t, parts, r.stdout.strip()), flush=True)
+            last_reported = t
     except Exception as e:  # keep the loop alive
         print('SYNC error %r' % e, flush=True)
