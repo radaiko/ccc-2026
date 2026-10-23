@@ -188,3 +188,6 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
 - [medium-cycles agent] Final 2-free-emitter scans also all UNSAT: 203/138/180/133/171/28 (7,2), 30/182 (9,2),
   132 (15,2). Found cycles that beat a rate are appended to runs/opus/cycles_2-medium.jsonl (anchor + lines).
 - [large agent 2] Passes 3-6 (l2_resuf.py with BOUNCE=1: every beam output is also bounce-post-processed; seeds 2-5, cuts c-1..c-6, d3..d14, top 15-50 longest): 4940 -> 4916; the last pass (top 15, seed 5) found nothing, the big programs are saturating at width 2000. Large total 5194 -> 4916 in this session.
+- [enormous agent] Saving runs with WTM=2 (beam_h2, HFORBID=1, width 2000, 100 1 0.3 0.25): cuts p0.85,p0.92 on the
+  60 longest programs 4721 -> 4632, on the other 80 4548 -> 4531, then p0.78,p0.96 on the 35 longest 4483 -> 4450
+  (other agents' wins merged in between). Cuts at a fraction of each copy's cells work better than dN cuts.
