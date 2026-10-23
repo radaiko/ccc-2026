@@ -106,15 +106,43 @@ class Model:
         return cfg
 
     def trans(self, a, b):
+        """Transition a -> b. Per emitter: U (moved +1), D (moved -1), Z (stayed), exactly one; toggle -> Z.
+        With self.sym, off emitters move as early as possible and never reverse (symmetry breaking: any
+        off stretch can be replaced by a straight move then waiting, firing is unchanged)."""
         n = len(self.offs)
+        if not hasattr(self, 'trs'):
+            self.trs = []
+            self.sym = getattr(self, 'sym', True)
+        mv = []
         for e in range(6):
             pa, aa = a[e]
             pb, ab = b[e]
+            U, D, Z = self.var(), self.var(), self.var()
+            self.add([U, D, Z])
             for i in range(n):
-                self.add([-pb[i]] + [pa[j] for j in (i - 1, i, i + 1) if 0 <= j < n])
-                # toggle -> same position
-                self.add([-ab, aa, -pa[i], pb[i]])
-                self.add([ab, -aa, -pa[i], pb[i]])
+                self.add([-U, -pa[i]] + ([pb[i + 1]] if i + 1 < n else []))
+                self.add([-D, -pa[i]] + ([pb[i - 1]] if i >= 1 else []))
+                self.add([-Z, -pa[i], pb[i]])
+            self.add([-ab, aa, Z])
+            self.add([ab, -aa, Z])
+            mv.append((U, D, Z))
+        rec = (a, b, mv)
+        if self.sym:
+            for (x, y, mv0) in self.trs:
+                if y is a:
+                    self._sym(x, a, b, mv0, mv)
+                if x is b:
+                    self._sym(a, b, y, mv, mv0)
+        self.trs.append(rec)
+
+    def _sym(self, x, a, b, m1, m2):
+        for e in range(6):
+            off = [x[e][1], a[e][1], b[e][1]]
+            U1, D1, Z1 = m1[e]
+            U2, D2, Z2 = m2[e]
+            self.add(off + [-Z1, Z2])
+            self.add(off + [-U1, -D2])
+            self.add(off + [-D1, -U2])
 
     def fire(self, cfg):
         """F[e][oi] var (active and at offset oi); for non-firing offsets None."""
@@ -290,6 +318,7 @@ def prog_with_prefix(r, pat, count, K, m, T0, timeout_ms=0):
     """Program = prefix of T0 lines (submission at T0) + (K,m)-cycle closing on the prefix's last config,
     repeated and cut after the count-th submission. Returns None / 'unknown' / program lines."""
     md = Model(r, pat)
+    md.sym = False
     start = md.fixed_start()
     pre = [md.config() for _ in range(T0)]
     prev = start
@@ -444,21 +473,28 @@ def auto2(r, pat, count, best, tmo, ctmo, mmax=3, maxfail=2, joint=True):
             T0 = len(bestprog) - 1
         return bestprog
     cands = sorted({(K / m, K, m) for m in range(1, mmax + 1) for K in range(1, int(g * m) + 1)
-                    if K / m <= g + 1e-9}, reverse=True)
+                    if K / m <= g + 1e-9}, key=lambda x: (-x[0], x[1]))
     found = []
     fails = 0
-    for rate, K, m in cands:
-        if any(abs(rate - x[0]) < 1e-9 for x in found):
-            continue
-        res = cycle_only(r, pat, K, m, ctmo, want_cfg=True)
-        log('cycle K=%d m=%d: %s' % (K, m, 'UNSAT' if res is None else res if res == 'unknown' else 'SAT'))
-        if res is None or res == 'unknown':
+    i = 0
+    while i < len(cands):
+        rate = cands[i][0]
+        group = [c for c in cands[i:] if abs(c[0] - rate) < 1e-9]
+        i += len(group)
+        ok = False
+        for _, K, m in group:
+            res = cycle_only(r, pat, K, m, ctmo, want_cfg=True)
+            log('cycle K=%d m=%d: %s' % (K, m, 'UNSAT' if res is None else res if res == 'unknown' else 'SAT'))
+            if res is not None and res != 'unknown':
+                found.append((rate, K, m, res))
+                ok = True
+                break
+        if ok:
+            fails = 0
+        else:
             fails += 1
             if fails >= maxfail:
                 break
-            continue
-        fails = 0
-        found.append((rate, K, m, res))
     found.sort()
     for rate, K, m, (cfg, subs) in found[:2]:
         cl = lines_between([cfg[-1]] + cfg)

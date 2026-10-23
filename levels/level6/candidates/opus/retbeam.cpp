@@ -87,7 +87,7 @@ void build() {
 }
 
 double WH = 3.0, W1 = 1.0, W2 = 0.3, WL = 0.5, WR = 1.0;
-int K = 6, NC = 1, PERPID = 0, FREE = 0, GOAL = 1;
+int K = 6, NC = 1, PERPID = 0, FREE = 0, GOAL = 0;
 struct Pair {
     unsigned char spos[6], sact, tpos[6], tact;
 };

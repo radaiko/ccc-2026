@@ -292,6 +292,8 @@ template <int NW> struct Solver {
         for (int depth = 0; depth < maxDepth; depth++) {
             auto& cur = levels.back();
             cands.clear();
+            double thr = -1e300;
+            const size_t KEEP = (size_t)width * 3, LIM = max((size_t)1 << 15, KEEP * 4);
             int found = -1;
             unsigned short foundIns = 0;
             for (int pi = 0; pi < (int)cur.size() && found < 0; pi++) {
@@ -380,7 +382,15 @@ template <int NW> struct Solver {
                         }
                     }
                     double sc = evaluate(child) + (rng() & 1023) * 1e-4;
+                    if (sc < thr) return;
                     cands.push_back({sc, pi, ins});
+                    if (cands.size() >= LIM) {
+                        nth_element(cands.begin(), cands.begin() + KEEP - 1, cands.end(),
+                                    [](const Cand& a, const Cand& b) { return a.score > b.score; });
+                        cands.resize(KEEP);
+                        thr = cands[KEEP - 1].score;
+                        for (auto& c : cands) thr = min(thr, c.score);
+                    }
                 };
                 // suf[e]: cells any of emitters e..5 can still hit this tick
                 B suf[7];
