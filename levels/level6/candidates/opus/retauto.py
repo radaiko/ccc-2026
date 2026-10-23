@@ -31,6 +31,7 @@ def main():
     freeW = int(opt('--freew', '2000'))
     minper = float(opt('--minper', '2'))
     runinK = int(opt('--runin', '0'))
+    kplus = int(opt('--kplus', '0'))
     name, width = args[0], int(args[1])
     inp = LEVEL / 'data' / ('in_level-6_%s.txt' % name)
     cs = list(cases(inp.read_text()))
@@ -52,7 +53,7 @@ def main():
                 if count < 2:
                     break
                 per = (len(prog) - subs[0][0]) / (count - 1)
-                K = math.ceil(per * nc - 1e-9) - 1
+                K = math.ceil(per * nc - 1e-9) - 1 + kplus
                 if K < minper * nc:
                     break
                 anchors = {}
