@@ -91,3 +91,7 @@
   repeat rate is OPTIMAL for 31, 187, 184, 182, 124, 49, 130, 158, 26, 59 (5/copy) and 107, 207, 77, 192 (4/copy);
   only run-ins can still improve them. 58: copy 5 exists, K=11 m=2 (5+6) -> 32 -> 30; 170 K=14 m=3 20 -> 19;
   50 K=11 m=2 107 -> 106; 186 17/3 and 11/2 UNSAT; 190 10/3 and 3 UNSAT.
+- CPU (Apple M5: 4 performance + 6 efficiency cores; load ran at ~23): profile of beam_e4 = evaluate 43%, leaf/child
+  build 30%, run/select 21%. PGO+LTO build (-fprofile-instr-generate, llvm-profdata, -flto -fprofile-instr-use)
+  of beam_e.cpp: identical output, ~14% less CPU -> swapped in as beam_e4. Same recipe made beam_l2/beamL ~15% SLOWER
+  (kept the old builds). Oversubscription + 600 s job timeouts wastes CPU: keep heavy processes <= ~10 in total.
