@@ -21,6 +21,10 @@ def job(i):
     open(f, 'w').write('\n'.join(best[i]) + '\n')
     p = run_job(['python3', str(HERE / 'satcyc.py'), str(inp), str(i), 'auto', f, tmo, ctmo],
                 capture_output=True, text=True)
+    logd = os.environ.get('SATLOG')
+    if logd:
+        os.makedirs(logd, exist_ok=True)
+        open(os.path.join(logd, '%d.err' % i), 'a').write(p.stderr or '')
     return i, [l for l in p.stdout.split('\n') if l.strip()], p.stderr
 
 

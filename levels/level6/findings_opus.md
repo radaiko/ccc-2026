@@ -54,3 +54,6 @@
 - [enormous agent] resuf_e.py (resuffix with --w/--bin/--seeds, cuts dN/fX/sK/tK, longest programs first) with
   beam_h (HFORBID) width 2000, weights 100 1 0.3 0.25, cuts d4,d7,d10,d14,s0: enormous 4841 -> 4723 after covering
   only the programs of length >= 35 (stopped to switch to medium); the rest of the patterns still untried.
+- [medium-cycles agent] Run-ins into the cycle (retbeam start=initial config, target=any submission config of the
+  found cycle, NC=1/2, rotated cycle after it) turn "equal-rate" cycles into wins: 50 122->116, 167 ->122,
+  119 85->79, 132 ->54 (NC=3, 28 ticks), 49 ->82, 35 ->86. `retauto.py --kplus 1 --runin 6`.
