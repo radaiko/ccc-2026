@@ -32,6 +32,9 @@ struct Geo {
     vector<char> fires;             // [e*RING+pos] -> beam hits any interior cell
 };
 Geo G;
+vector<double> cellW;
+int HMODE = 0, PCAP = 0;
+double WD = 0.0, COPYW = -1;
 
 int ringdist(int a, int b) {
     int d = abs(a - b);
@@ -70,6 +73,30 @@ void build() {
             if (!rel.count({y, x})) rel[{y, x}] = rel.size();
         }
     NREL = rel.size();
+    // per pattern-cell hardness
+    cellW.assign(NP, 0.0);
+    for (int ci = 0; ci < NP; ci++) {
+        int maxrun = 0, minhalo = 99;
+        for (int d = 0; d < 3; d++) {
+            int run = 1, halo = 0;
+            for (int sgn = -1; sgn <= 1; sgn += 2) {
+                int y = pc[ci].first, x = pc[ci].second;
+                bool inrun = true;
+                while (true) {
+                    y += sgn * DR[d];
+                    x += sgn * DC[d];
+                    if (y < 0 || y >= H || x < 0 || x >= Wd || g[y][x] != 'O') break;
+                    if (pat[y][x] == 'M') { if (inrun) run++; }
+                    else { inrun = false; if (rel.count({y, x})) halo++; }
+                }
+            }
+            maxrun = max(maxrun, run);
+            minhalo = min(minhalo, halo);
+        }
+        if (HMODE == 1) cellW[ci] = 1.0 / maxrun;
+        else if (HMODE == 2) cellW[ci] = min(minhalo, 6) / 6.0;
+        else if (HMODE == 3) cellW[ci] = maxrun <= 1 ? 1.0 : maxrun <= 2 ? 0.5 : 0.0;
+    }
     G.lineCells.assign(6 * RING, {});
     G.fires.assign(6 * RING, 0);
     for (int e = 0; e < 6; e++)
@@ -96,6 +123,8 @@ template <int NW> struct Solver {
     vector<B> reach1, reach2;      // [(e*RING+pos)*2+act]
     vector<char> allowed;          // [e*RING+pos] position usable
     B Pm, Hm;
+    vector<B> cls;
+    vector<double> clsW;
     struct Node {
         unsigned char pos[6];
         unsigned char act, copies;
@@ -119,6 +148,17 @@ template <int NW> struct Solver {
         for (int i = 0; i < NREL; i++) (i < NP ? Pm : Hm).w[i >> 6] |= 1ULL << (i & 63);
         for (int k = 0; k < 6 * RING; k++)
             for (int c : G.lineCells[k]) line[k].w[c >> 6] |= 1ULL << (c & 63);
+        if (WD != 0) {
+            map<double, B> mp;
+            for (int i = 0; i < NP; i++) {
+                if (cellW[i] == 0) continue;
+                if (!mp.count(cellW[i])) { B z; memset(z.w, 0, sizeof z.w); mp[cellW[i]] = z; }
+                mp[cellW[i]].w[i >> 6] |= 1ULL << (i & 63);
+            }
+            for (auto& kv : mp) { clsW.push_back(kv.first * WD); cls.push_back(kv.second); }
+        }
+        if (getenv("COPYF")) COPYW = atof(getenv("COPYF")) * NP;
+        if (COPYW < 0) COPYW = 1000.0 * NP;
         // Positions: within the firing range of the emitter or one step beyond.
         allowed.assign(6 * RING, 0);
         for (int e = 0; e < 6; e++)
@@ -233,7 +273,13 @@ template <int NW> struct Solver {
             }
             tail = WTM * mx + WTS * (double)sm / nmiss;
         }
-        return n.copies * 1000.0 * NP + 4.0 * pm - WH * hm + W1 * p1 + W2 * p2 - WL * lg - tail;
+        double wd = 0;
+        for (size_t q = 0; q < cls.size(); q++) {
+            int c = 0;
+            for (int k = 0; k < NW; k++) c += __builtin_popcountll(cls[q].w[k] & n.M.w[k]);
+            wd += clsW[q] * c;
+        }
+        return n.copies * COPYW + 4.0 * pm + wd - WH * hm + W1 * p1 + W2 * p2 - WL * lg - tail;
     }
 
     struct Cand {
@@ -384,8 +430,10 @@ template <int NW> struct Solver {
             sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) { return a.score > b.score; });
             vector<Node> next;
             unordered_set<u64> seen;
+            vector<int> perPar(PCAP ? cur.size() : 0, 0);
             for (auto& cd : cands) {
                 if ((int)next.size() >= width) break;
+                if (PCAP && perPar[cd.parent] >= PCAP) continue;
                 Node ch = apply(cur[cd.parent], cd.ins);
                 ch.parent = cd.parent;
                 ch.ins = cd.ins;
@@ -393,8 +441,9 @@ template <int NW> struct Solver {
                 u64 h = hashNode(ch);
                 if (!seen.insert(h).second) continue;
                 next.push_back(ch);
+                if (PCAP) perPar[cd.parent]++;
             }
-            levels.push_back(move(next));
+            levels.push_back(std::move(next));
         }
         return {};
     }
@@ -474,6 +523,10 @@ int main(int argc, char** argv) {
             prefixOut.push_back(a + " " + b + " " + c + " " + d + " " + e + " " + f);
         }
     }
+    if (getenv("HMODE")) HMODE = atoi(getenv("HMODE"));
+    if (getenv("PCAP")) PCAP = atoi(getenv("PCAP"));
+    if (getenv("WD")) WD = atof(getenv("WD"));
+    if (getenv("COPYW")) COPYW = atof(getenv("COPYW"));
     if (getenv("WTM")) WTM = atof(getenv("WTM"));
     if (getenv("WTS")) WTS = atof(getenv("WTS"));
     if (getenv("TAILN")) TAILN = atoi(getenv("TAILN"));
