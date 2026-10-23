@@ -1,5 +1,8 @@
 # Level 6: team findings
 
+- codex3: The validator requires all emitters switched off at program end; append a simultaneous toggle-off tick after the final submission.
+- codex3: Three nonparallel beams paint up to three pairwise intersections per tick; rejecting halo intersections and triple intersections on targets permits safe multi-cell routes.
+
 One line per finding: `- agent: finding`. No code, no outputs.
 
 - codex2: Two nonparallel emitters suffice: their single intersection paints one target cell; scan consecutive cells with both active and gate one beam off across gaps to avoid any halo matter.
