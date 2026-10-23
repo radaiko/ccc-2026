@@ -4056,15 +4056,14 @@ B F T T F B
 B T - - F -
 T T F B T B
 T T F B T B
-B F T B - -
-- F T - B B
-T T B - B B
-T - B B F B
-B F B T - B
-- - B B B -
-- F B - - -
-B F B - B F
-T T B T T T
+B F - B B B
+T T B - B T
+B F B B F B
+B - B B B T
+F - B - B B
+T F B T T F
+- F B T F F
+T T B - B T
 
 T T B B - T
 B B T T T -
