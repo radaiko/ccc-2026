@@ -269,13 +269,15 @@ def atleast(md, xs, m):
     md.add([prev[m - 1]])
 
 
-def build_cycle(md, K, m=1, start=None):
+def build_cycle(md, K, m=1, start=None, at=None):
     """Cycle configs C_0..C_{K-1}; ticks fire C_0..C_{K-1} from empty matter, previous config = C_{K-1}
     (or `start` for a free / given start config: then it is not closed). Submission on the last tick and
     at least m submissions in total."""
     cs = [md.config() for _ in range(K)]
     for t in range(K):
         if start is not None and t == 0:
+            if start != 'free':
+                md.trans(start, cs[0])
             continue  # free start: the first config is arbitrary (any config is one step from some config)
         md.trans(cs[t - 1], cs[t])
     M = None
@@ -285,13 +287,15 @@ def build_cycle(md, K, m=1, start=None):
         Ss.append(S)
     md.add([Ss[-1]])
     atleast(md, Ss[:-1], m - 1)
+    for t in (at or []):
+        md.add([Ss[t - 1]])
     return cs, Ss
 
 
-def cycle_only(r, pat, K, m=1, timeout_ms=0, free=False, want_cfg=False):
+def cycle_only(r, pat, K, m=1, timeout_ms=0, free=False, want_cfg=False, at=None):
     md = Model(r, pat)
     st = 'free' if free else None
-    cs, Ss = build_cycle(md, K, m, st)
+    cs, Ss = build_cycle(md, K, m, st, at)
     res = z3sat.solve(md.nv, md.cl, timeout_ms)
     if res is None or res == 'unknown':
         return res
@@ -573,6 +577,151 @@ def prefix_opt(r, pat, count, best, tmo, jmax=3):
     return bestprog
 
 
+def segment(r, pat, Za, Zb, T, nsub, timeout_ms=0):
+    """T lines from config Za (empty matter) to config Zb with a submission on the last line and >= nsub
+    submissions in total. Returns lines / None / 'unknown'."""
+    span = max(abs(o) for o, a in list(Za) + list(Zb))
+    md = Model(r, pat, span)
+
+    def fix(cfg, Z):
+        for e in range(6):
+            pos, act = cfg[e]
+            o, a = Z[e]
+            md.add([pos[md.offs.index(o)]])
+            md.add([act if a else -act])
+    st = md.config()
+    fix(st, Za)
+    cs = [md.config() for _ in range(T)]
+    fix(cs[-1], Zb)
+    prev = st
+    M = None
+    Ss = []
+    for t in range(T):
+        md.trans(prev, cs[t])
+        M, S = md.tick(cs[t], M)
+        Ss.append(S)
+        prev = cs[t]
+    md.add([Ss[-1]])
+    atleast(md, Ss[:-1], nsub - 1)
+    res = z3sat.solve(md.nv, md.cl, timeout_ms)
+    if res is None or res == 'unknown':
+        return res
+    return lines_between([md.decode(res, st)] + [md.decode(res, c) for c in cs])
+
+
+def segopt(r, pat, count, best, tmo, jmax=2, maxseg=40):
+    """Re-solve program segments between submissions (start counts as a boundary): from the config after
+    boundary i to the config at submission j with the same number of submissions in fewer lines. A shorter
+    segment replaces every identical occurrence."""
+    prog = list(best)
+    start = [(0, False)] * 6
+    tried = set()
+    improved = True
+    nseg = 0
+    while improved and nseg < maxseg:
+        improved = False
+        subs = sub_ticks(r, pat, prog)
+        cfgs = prog_configs(r, prog)
+        bounds = [-1] + subs
+        segs = []
+        for i in range(len(bounds)):
+            for j in range(i + 1, min(len(bounds), i + jmax + 1)):
+                a, b = bounds[i], bounds[j]
+                Za = tuple(start) if a < 0 else tuple(cfgs[a])
+                Zb = tuple(cfgs[b])
+                key = (Za, Zb, j - i, tuple(prog[a + 1:b + 1]))
+                if key in tried:
+                    continue
+                tried.add(key)
+                # value: how often this exact segment occurs
+                occ = sum(1 for x in range(len(bounds)) for y in (x + j - i,) if y < len(bounds) and
+                          (tuple(start) if bounds[x] < 0 else tuple(cfgs[bounds[x]])) == Za and
+                          tuple(cfgs[bounds[y]]) == Zb and
+                          tuple(prog[bounds[x] + 1:bounds[y] + 1]) == key[3])
+                segs.append((-occ, b - a, i, j, a, b, Za, Zb))
+        segs.sort()
+        for negocc, L, i, j, a, b, Za, Zb in segs:
+            nseg += 1
+            T = L - 1
+            found = None
+            while T >= j - i:
+                res = segment(r, pat, Za, Zb, T, j - i, tmo)
+                log('seg %d-%d (lines %d..%d, occ %d) T=%d: %s' % (i, j, a + 2, b + 1, -negocc, T,
+                    'UNSAT' if res is None else res if res == 'unknown' else 'SAT'))
+                if res is None or res == 'unknown':
+                    break
+                found = res
+                T -= 1
+            if found:
+                old = prog[a + 1:b + 1]
+                # replace every identical occurrence (boundaries are config-only states)
+                new = []
+                k = 0
+                while k < len(prog):
+                    if prog[k:k + len(old)] == old and k > 0 and k - 1 in bounds and \
+                            tuple(cfgs[k - 1]) == Za or (k == 0 and a < 0 and prog[:len(old)] == old):
+                        new += found
+                        k += len(old)
+                    else:
+                        new.append(prog[k])
+                        k += 1
+                cand = truncate(r, pat, count, new)
+                if cand is None or len(cand) >= len(prog):
+                    cand = truncate(r, pat, count, prog[:a + 1] + found + prog[b + 1:])
+                if cand is not None and len(cand) < len(prog):
+                    log('  -> len %d (was %d)' % (len(cand), len(prog)))
+                    prog = cand
+                    improved = True
+                    break
+            if nseg >= maxseg:
+                break
+    return prog if len(prog) < len(best) else None
+
+
+def free_copy_cfgs(r, pat, k, timeout_ms=0, block=()):
+    """A copy in exactly k ticks from a free submission configuration Zp: returns (Zp, Z1) or None/'unknown'.
+    `block`: list of (Zp, Z1) pairs to exclude."""
+    md = Model(r, pat)
+    st = md.config()
+    cs, Ss = build_cycle(md, k, 1, st)
+    for Za, Zb in block:
+        lits = []
+        for cfg, Z in ((st, Za), (cs[-1], Zb)):
+            for e in range(6):
+                pos, act = cfg[e]
+                o, a = Z[e]
+                lits += [-act if a else act, -pos[md.offs.index(o)]]
+        md.add(lits)
+    res = z3sat.solve(md.nv, md.cl, timeout_ms)
+    if res is None or res == 'unknown':
+        return res
+    return md.decode(res, st), md.decode(res, cs[-1])
+
+
+def multi(r, pat, a, b, tries, ftmo, atmo):
+    """Look for a 2-copy cycle (a + b ticks): free a-copies Zp -> Z1, then a b-copy Z1 -> Zp (both ends fixed)
+    and anchored (a+b, 2) cycles through Z1 and Zp. Returns K lines of a cycle ending in its anchor and the
+    anchor, or None."""
+    block = []
+    for it in range(tries):
+        res = free_copy_cfgs(r, pat, a, ftmo, block)
+        if res is None or res == 'unknown':
+            log('free copy %d: %s' % (a, res))
+            return None
+        Zp, Z1 = res
+        log('free copy %d #%d: %s -> %s' % (a, it, Zp, Z1))
+        block.append((Zp, Z1))
+        back = segment(r, pat, Z1, Zp, b, 1, atmo)
+        log('  back segment %d: %s' % (b, 'UNSAT' if back is None else back if back == 'unknown' else 'SAT'))
+        for Z in (Z1, Zp):
+            res = anchored_cycle(r, pat, Z, a + b, 2, atmo)
+            log('  anchored K=%d m=2: %s' % (a + b, 'UNSAT' if res is None else res if res == 'unknown'
+                                            else 'SAT'))
+            if res is not None and res != 'unknown':
+                return res, Z
+    return None
+
+
 def auto2(r, pat, count, best, tmo, ctmo, mmax=3, maxfail=2, joint=True):
     """Cycles (K,m) with rate <= current, tried from the current rate downwards (stop after `maxfail`
     consecutive failures); for the best cycles a shortest prefix into one of its submission configs."""
@@ -663,7 +812,8 @@ def main():
         k = int(sys.argv[4])
         m = int(sys.argv[5]) if len(sys.argv) > 5 else 1
         import os
-        res = cycle_only(r, pat, k, m, int(os.environ.get('SATTMO', '0')), free=(mode == 'copy'))
+        at = [int(x) for x in os.environ['SATAT'].split(',')] if os.environ.get('SATAT') else None
+        res = cycle_only(r, pat, k, m, int(os.environ.get('SATTMO', '0')), free=(mode == 'copy'), at=at)
         if res is None:
             print('UNSAT')
         elif res == 'unknown':
@@ -671,14 +821,21 @@ def main():
         else:
             print('SAT')
             print('\n'.join(res))
-    elif mode in ('anchor', 'prefix'):
+    elif mode in ('anchor', 'prefix', 'seg'):
         best = [l for l in open(sys.argv[4]).read().splitlines() if l.strip()]
         tmo = int(sys.argv[5]) if len(sys.argv) > 5 else 20000
-        res = (anchor if mode == 'anchor' else prefix_opt)(r, pat, count, best, tmo)
+        res = {'anchor': anchor, 'prefix': prefix_opt, 'seg': segopt}[mode](r, pat, count, best, tmo)
         if res:
             n = simulate(r, pat, [l.split() for l in res])
             log('RESULT len %d sim %d/%d (best %d)' % (len(res), n, count, len(best)))
             print('\n'.join(res))
+    elif mode == 'multi':
+        a, b, tries = int(sys.argv[4]), int(sys.argv[5]), int(sys.argv[6])
+        res = multi(r, pat, a, b, tries, int(sys.argv[7]) if len(sys.argv) > 7 else 0,
+                    int(sys.argv[8]) if len(sys.argv) > 8 else 60000)
+        if res:
+            print('ANCHOR', res[1])
+            print('\n'.join(res[0]))
     elif mode == 'auto':
         # auto <bestfile(one program)> <timeout_ms>
         best = [l for l in open(sys.argv[4]).read().splitlines() if l.strip()]
