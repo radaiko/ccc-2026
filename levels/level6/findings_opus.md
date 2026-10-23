@@ -95,3 +95,5 @@
   build 30%, run/select 21%. PGO+LTO build (-fprofile-instr-generate, llvm-profdata, -flto -fprofile-instr-use)
   of beam_e.cpp: identical output, ~14% less CPU -> swapped in as beam_e4. Same recipe made beam_l2/beamL ~15% SLOWER
   (kept the old builds). Oversubscription + 600 s job timeouts wastes CPU: keep heavy processes <= ~10 in total.
+- [large agent 2] resuffix with beam_e.cpp (built as beam_l2), HFORBID=1, width 2000, weights 100 1 0.3 0.25, longest first: pass 1 cuts d4,d7,d10,d14,s0 (all 190) 5194 -> 5053; pass 2 (l2_resuf.py, new cut cK = every submission tick + K) c-3,c-6,c0,d5,d9,d18 on the 80 longest + bounce -> large 4946. Cuts inside copy 1 of count-6 patterns gave the biggest single wins (141, 64: -6 each).
+- [large agent 2] Exact SAT on large is only useful for small walks: fixed-junction copy windows (l2_win.py) of 172 are UNSAT up to 14 ticks (beam copies are locally optimal for their junctions); palindromic walks (l2_palsat.py, matter model) and clean-coverage walks/cycles (l2_covsat.py) time out (UNKNOWN at 60-120 s) for n >= 7 on r=7/8.
