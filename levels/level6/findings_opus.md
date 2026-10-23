@@ -75,3 +75,7 @@
 - [large agent, medium run-ins] Any valid 2-tick copy after a submission can be repeated forever (reversible moves), so if no prefix "first copy at T0 + second copy 2 ticks later" exists (runin.py j=2 UNSAT), the total is >= f_min + 1 + 2(c-1)... for 106 and 33 this proves the current programs optimal. After the run-in fixes all 169 non-repeat-gap medium patterns are provably optimal given the per-copy floors.
 - [medium-cycles agent] retauto pass 2 (top 20, NC 2/3/1, kplus 1, runin 6): 153 75->58 (2 copies / 6 ticks = 3.0
   per copy), 28 61->57, 26 54->52, 186 ->28, 180 ->50, 58 35->32. Medium 5847.
+- [medium agent] MULTI-COPY cycles break the periodic bound: 142 and 105 have no periodic 3-cycle (UNSAT) but a
+  6-tick cycle with 2 submissions (3+3) is SAT in ~2 s -> 142 54 -> 44, 105 26 -> 23; 28 K=9 m=2 57 -> 56
+  (satcyc.py cycle K m; satscan.py scans (K,m<=3) below the current rate, satbuild.py builds SAT prefix + cycle).
+  Segment re-solve also gave 132 54 -> 51, 130 79 -> 76.

@@ -83,6 +83,13 @@ def main():
                         log.append('runin%d' % len(alt))
                         bestp = alt
                 log.append('nc%d K%d:cyc%d->%s' % (nc, K, len(cyc), len(bestp) if bestp else 'x'))
+                if len(cyc) / nc < per - 1e-9:
+                    # record cycles that beat the current rate (useful for run-in searches)
+                    import json, fcntl
+                    with open(LEVEL / 'runs' / 'opus' / ('cycles_%s.jsonl' % name), 'a') as cf:
+                        fcntl.flock(cf, fcntl.LOCK_EX)
+                        cf.write(json.dumps({'pattern': i, 'nc': nc, 'K': len(cyc), 'anchor': [list(keys[pid][0]),
+                                 keys[pid][1]], 'cycle': cyc, 'assembled': len(bestp) if bestp else None}) + '\n')
                 if bestp and len(bestp) < len(prog) and valid(r, pat, count, bestp):
                     print('pattern %d: %d -> %d (nc %d cycle %d)' % (i, len(prog), len(bestp), nc, len(cyc)),
                           flush=True)
