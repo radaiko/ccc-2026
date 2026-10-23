@@ -73,6 +73,9 @@ def main():
     weights = opt(args, '--w', '3,1,0.3,0.5').split(',')
     top = int(opt(args, '--top', '0'))
     binary = opt(args, '--bin', 'beam_p')
+    raw = opt(args, '--raw', '0') == '1'
+    nosave = opt(args, '--nosave', '0') == '1'
+    maxd = int(opt(args, '--maxd', '0'))  # >0: allow suffixes up to this many lines longer than the best
     name, width, cuts = args[0], args[1], args[2].split(',')
     inp = LEVEL / 'data' / ('in_level-6_%s.txt' % name)
     cs = list(cases(inp.read_text()))
@@ -96,6 +99,21 @@ def main():
                 t = int(L * float(c[1:]))
             elif c[0] == 't':
                 t = int(c[1:])
+            elif c[0] == 'p':
+                # every copy: the line on which the copy reaches fraction X of the pattern cells
+                from revbeam_e import progress
+                pr, npc = progress(r, pat, best[i])
+                done = 0
+                for k, v in enumerate(pr):
+                    if v == 0 and k > 0 and pr[k - 1] > 0 and done == 0:
+                        pass
+                    if v >= float(c[1:]) * npc and done == 0:
+                        if 0 < k + 1 < L - 1:
+                            ts.add(k + 1)
+                        done = 1
+                    if v == 0 and k > 0 and pr[k - 1] > 0:
+                        done = 0  # submission happened: next copy
+                continue
             else:
                 if count < 2:
                     continue
@@ -114,7 +132,7 @@ def main():
     def job(arg):
         i, t, path, L, s = arg
         env = dict(os.environ, PREFIX=path)
-        out = run_job([str(HERE / binary), str(inp), str(i), width, s] + weights + [str(L - t)],
+        out = run_job([str(HERE / binary), str(inp), str(i), width, s] + weights + [str(L - t + maxd)],
                       capture_output=True, text=True, env=env).stdout.split('\n')
         return i, t, s, [l for l in out if l.strip() and l != 'NONE']
 
@@ -122,6 +140,11 @@ def main():
     with ThreadPoolExecutor(int(os.environ.get('JOBS', 3))) as ex:
         for i, t, s, prog in ex.map(job, jobs):
             r, pat, count = cs[i]
+            if raw:
+                print('RAW %d cut %d seed %s: best %d got %s' % (i, t, s, len(best[i]), len(prog) if prog else 'FAIL'),
+                      flush=True)
+            if nosave:
+                continue
             if prog and len(prog) < len(best[i]) and valid(r, pat, count, prog):
                 print('pattern %d (cut %d seed %s): %d -> %d' % (i, t, s, len(best[i]), len(prog)), flush=True)
                 best[i] = prog

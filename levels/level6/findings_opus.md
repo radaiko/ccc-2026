@@ -64,3 +64,11 @@
 - [large agent, medium run-ins] runin.py: exact SAT (satcyc Model) check "any submission at a tick < f" (f = current first submission tick, one query with OR over all submission vars). On the 169 medium patterns with optimal repeat rate: 158 are UNSAT => their programs are provably optimal (first copy at minimum tick, repeats at the floor). For the other 11, exact joint SAT (prefix of T0 ticks with >= j copies ending in the config that closes a (K,m) cycle, j<=2, m<=2) improved 9 patterns by 1 line each (72, 20, 4, 191, 131, 114, 83, 55, 11): medium -9. 106 and 33 can submit earlier but no cycle entry found (j<=5, m<=3).
 - [enormous agent, medium] Full medium pass beam_h (HFORBID=1) width 3000 weights 100 1 0.3 0.25: 5901 -> 5855
   (mostly 1-line wins, best -4 on #192); a 30-pattern width-1000 sample with WH=3 vs WH=100 was similar (1681 vs 1687).
+- [medium agent] Exact SAT model (candidates/opus/satcyc.py, Z3 SAT core via ctypes from the Android-SDK libz3)
+  reproduces cyc2 (2-cycles) in <0.3 s and proves periodic 3-cycles UNSAT for all 20 worst medium patterns in
+  <0.3 s each; periodic K=4/5 UNSAT proofs take 5-80 s on r=5. 50/49/35 have no periodic <=5-cycle, but 35's
+  5-tick copies come as a period-10 2-copy cycle, and 50 has a 5-tick copy from SOME config (copy 5 SAT, 48 s).
+- [medium agent] Segment re-solve (satcyc.py seg: config after submission i -> config at submission j with the
+  same submissions in fewer lines, both ends fixed, replaces all identical occurrences) is fast (anchored
+  instances solve in ~1 s): 197 68 -> 67. Anchored cycles at the current submission configs of 167/50 are UNSAT
+  for every lower rate (the beams' cycles are locally optimal at their anchors). Medium total 5854.
