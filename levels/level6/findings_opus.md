@@ -161,3 +161,9 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
   cells (resuf_e.py cuts p0.85,p0.92), width 2000, top-40 programs (138 cuts): sum(new-best) WTM=0 -7 (26 wins),
   WTM=1 -71 (47 wins), WTM=2 -93 (53 wins), WTM=4 -7 (8 fails), WTM=6 +120.
 - [large agent, medium run-ins] 41 repeat-gap patterns: exact SAT fixed-junction prefixes (runin2.py: q copies ending exactly in the config after submission s, then the periodically extended rest of the best program) gave 187 13->12 and 167 122->121; SAT goes 'unknown' (30 s) for r=5 prefixes of >= 15 ticks. The beam variant (runin3.py, beamL TARGET/CNTOVR, width 1000, s<=8, q in s..s+2, 707 jobs) found nothing.
+- [medium-cycles agent] Negative results on my half of the 41 (50,132,35,119,144,28,80,203,153,138,30,180,142,133,
+  171,182,170,105,117,141): fixed-anchor SAT at every distinct submission config of the bests found NO shorter
+  (K,m) cycle for m=1,2,3 (all UNSAT except 170/141 equal-rate); cycmine.py (retbeam ALL mode proposes cycles
+  through ~3000 one-copy-continuation anchors, SAT tries K-1 at each) proved ~30 more anchors per pattern UNSAT;
+  m=4 anchored: UNSAT/unknown at 30 s. Speed of anchored SAT (pattern 50, K=10 m=2): 0-2 free emitters <2 s,
+  3 free 12 s, 4 free 25 s, 5-6 free or positions-free unknown at 120-300 s.
