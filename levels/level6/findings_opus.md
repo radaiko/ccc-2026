@@ -182,3 +182,6 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
   rebuilds every binary incl. the PGO beam_e4) and candidates/opus/tools/ (intervals.py = per-pattern submission
   gaps, profile.py = per-tick progress, waste.py = tail/travel waste per file; they contain absolute paths of the
   original laptop: adjust sys.path / file locations on a new machine).
+- [medium agent] Final SAT checks: 186 (5,5,6) UNSAT, 58 (5,5) UNSAT, 167 (6,7) and 161 (6,7) unknown after
+  1200/600 s, 197 (7,7,8) unknown after 840 s. Open on my half: 167 (rate 7), 161 (7), 197 (7.5), 58 (5.5),
+  190 (3.5); all other patterns of my half are at proven-optimal repeat rate.
