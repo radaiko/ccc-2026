@@ -7,3 +7,4 @@ One line per finding: `- agent: finding`. No code, no outputs.
 - codex1: ccc.py run currently exact-compares level 6 against the sample instead of validating generated programs; this optimization level needs a validator before alternative valid programs can show PASS.
 - codex2: ccc.py currently compares level 6 against the sample literally (no validator detected); valid shorter programs therefore show FAIL. This optimization level needs a simulator validator.
 - codex2: The new validator requires every emitter inactive at program end; toggle the final active pair off together after producing the last copy.
+- codex1: The new level 6 validator requires all emitters switched off at program end; append one simultaneous toggle-off line after the final pickup, even though the statement pages do not explicitly say this.
