@@ -1,0 +1,15 @@
+# Local runs: full inputs, outputs, uploads. Only the example is shared.
+levels/*/data/*
+!levels/*/data/*example*
+levels/*/out/
+levels/*/runs/
+levels/*/pages/
+levels/*/scratch/
+submissions/
+*.zip
+
+__pycache__/
+*.pyc
+.DS_Store
+.idea/
+.vscode/
