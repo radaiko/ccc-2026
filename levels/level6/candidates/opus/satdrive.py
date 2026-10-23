@@ -7,7 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from harness import HERE, LEVEL, cases, load_best, save_best, valid, run_job
 
 name, sel = sys.argv[1], sys.argv[2]
-tmo = sys.argv[3] if len(sys.argv) > 3 else '60000'
+tmo = sys.argv[3] if len(sys.argv) > 3 else '30000'
+ctmo = sys.argv[4] if len(sys.argv) > 4 else '8000'
 inp = LEVEL / 'data' / ('in_level-6_%s.txt' % name)
 cs = list(cases(inp.read_text()))
 best = load_best(name)
@@ -18,7 +19,7 @@ tmpd = tempfile.mkdtemp(prefix='satdrive_')
 def job(i):
     f = os.path.join(tmpd, 'b%d.txt' % i)
     open(f, 'w').write('\n'.join(best[i]) + '\n')
-    p = run_job(['python3', str(HERE / 'satcyc.py'), str(inp), str(i), 'auto', f, tmo],
+    p = run_job(['python3', str(HERE / 'satcyc.py'), str(inp), str(i), 'auto', f, tmo, ctmo],
                 capture_output=True, text=True)
     return i, [l for l in p.stdout.split('\n') if l.strip()], p.stderr
 
@@ -27,7 +28,7 @@ saved = 0
 with ThreadPoolExecutor(int(os.environ.get('JOBS', '2'))) as ex:
     for i, prog, err in ex.map(job, idxs):
         r, pat, count = cs[i]
-        tail = [l for l in err.splitlines() if l.startswith(('B ', 'copy', 'RESULT'))]
+        tail = [l for l in err.splitlines() if l.startswith(('B ', 'cycle', 'RESULT')) and 'unknown' not in l]
         print('pattern %d: %s' % (i, ' | '.join(tail)), flush=True)
         if prog and valid(r, pat, count, prog):
             cur = load_best(name)[i]

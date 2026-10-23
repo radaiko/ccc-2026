@@ -51,3 +51,6 @@
   sample (raw 866 vs 964); width-600 pass with them: enormous 5035 -> 4853, reversed copy 2 again -> 4841.
 - [enormous agent] beam_e.cpp env HFORBID=1: skip children that create halo matter from a clean parent and prune
   subtrees where a 2-hit halo cell cannot get a 3rd hit from later emitters: 2-2.5x faster, same quality at WH=100.
+- [enormous agent] resuf_e.py (resuffix with --w/--bin/--seeds, cuts dN/fX/sK/tK, longest programs first) with
+  beam_h (HFORBID) width 2000, weights 100 1 0.3 0.25, cuts d4,d7,d10,d14,s0: enormous 4841 -> 4723 after covering
+  only the programs of length >= 35 (stopped to switch to medium); the rest of the patterns still untried.
