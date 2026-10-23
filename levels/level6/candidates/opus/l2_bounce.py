@@ -11,7 +11,7 @@ from l2sim import Model
 WAIT = '- - - - - -'
 
 
-def bounce(md, cfgs, prog, count, hi, lo, M0, ndone, maxlen, waitmode, waitturn=0):
+def bounce(md, cfgs, prog, count, hi, lo, M0, ndone, maxlen, waitmode, waitturn=0, turnsub=True):
     """prog[:hi+1] already simulated: matter M0 after tick hi, ndone submissions. Walk from index hi."""
     out = list(prog[:hi + 1])
     M = M0
@@ -33,6 +33,13 @@ def bounce(md, cfgs, prog, count, hi, lo, M0, ndone, maxlen, waitmode, waitturn=
             continue
         nxt = cur + d
         if nxt < lo or nxt > hi:
+            if not turnsub:
+                d = -d
+                pend = waitturn
+                stuck += 1
+                if stuck > 3:
+                    return None
+                continue
             # window end without submission: wait (repeat config) once, then turn
             if waitmode and stuck == 0:
                 out.append(WAIT)
@@ -54,9 +61,10 @@ def bounce(md, cfgs, prog, count, hi, lo, M0, ndone, maxlen, waitmode, waitturn=
         M, s = md.step(M, cfgs[cur])
         if s:
             ndone += 1
-            d = -d
+            if turnsub:
+                d = -d
+                pend = waitturn
             stuck = 0
-            pend = waitturn
     return out
 
 
@@ -97,8 +105,11 @@ def main():
             for lo in range(0, hi):
                 for wm in (0, 1):
                   for wt in (0, 1):
+                   for ts in (True, False):
+                    if not ts and wm:
+                        continue
                     lim = len(bestc) if bestc else len(prog)
-                    c = bounce(md, cfgs, prog, count, hi, lo, M0, nd0, lim, wm, wt)
+                    c = bounce(md, cfgs, prog, count, hi, lo, M0, nd0, lim, wm, wt, ts)
                     if c and (bestc is None or len(c) < len(bestc)):
                         bestc = c
         if bestc and len(bestc) < len(prog) and valid(r, pat, count, bestc):
