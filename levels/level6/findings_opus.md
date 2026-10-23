@@ -167,3 +167,5 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
   through ~3000 one-copy-continuation anchors, SAT tries K-1 at each) proved ~30 more anchors per pattern UNSAT;
   m=4 anchored: UNSAT/unknown at 30 s. Speed of anchored SAT (pattern 50, K=10 m=2): 0-2 free emitters <2 s,
   3 free 12 s, 4 free 25 s, 5-6 free or positions-free unknown at 120-300 s.
+- [medium agent] 197: 2-copy cycle with fixed copy lengths (7,8) (satq.py 197:15:2:at=7,15, SAT in 448 s)
+  -> 65 -> 61. Fixing the submission ticks of a multi-copy cycle makes these big-pattern queries solvable.
