@@ -58,3 +58,6 @@
   found cycle, NC=1/2, rotated cycle after it) turn "equal-rate" cycles into wins: 50 122->116, 167 ->122,
   119 85->79, 132 ->54 (NC=3, 28 ticks), 49 ->82, 35 ->86. `retauto.py --kplus 1 --runin 6`.
 - [large agent] beamL (WH=100) stalls (NONE or long tails) when emitters sit in a plateau where every improving path needs >2 ticks without visible progress (e.g. 24/28 cells for 180 ticks); tail terms WTM=1 (max over missing cells of 2nd-nearest emitter distance) removed all NONEs on the sample (sample 1169 -> 1124). Two more full w300 passes with WTM=1: 5216 -> 5194. HMODE/WD cell-hardness weights, PCAP, COPYF smoothing, W1=2/WL=1 were neutral or worse.
+- Waste profile of the best programs at total 15,936 (scratchpad waste.py): ticks spent on the last 10% of each
+  copy's cells: medium 343 / large 815 (16%) / enormous 1054 (22%); one-cell ticks 598 / 651 / 710; start travel
+  102 / 157 / 121. Medium's gap is structural (cycle length, proven floor 4895); large/enormous lose most in tails.

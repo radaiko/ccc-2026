@@ -23,7 +23,7 @@ import z3sat  # noqa: E402
 
 
 class Model:
-    def __init__(self, r, pat):
+    def __init__(self, r, pat, span=None):
         self.r = r
         self.nv = 0
         self.cl = []
@@ -45,7 +45,8 @@ class Model:
         self.cells = self.P + self.H
         idx = {c: i for i, c in enumerate(self.cells)}
         # line of emitter e at offset o: which modelled cells it hits
-        self.offs = list(range(-r, r + 1))
+        span = max(r, span or r)
+        self.offs = list(range(-span, span + 1))
         self.hit = [[[] for _ in self.offs] for _ in range(6)]  # hit[e][oi] = cell indices
         self.cellline = [[None] * 6 for _ in self.cells]  # cellline[c][e] = oi
         for e in range(6):
@@ -355,19 +356,23 @@ def prog_with_prefix(r, pat, count, K, m, T0, timeout_ms=0):
     return prog
 
 
-def prefix_to(r, pat, T0, target, timeout_ms=0):
-    """Prefix of T0 lines from the start, first submission on line T0, ending exactly in config `target`
-    (decoded config list of (offset, active)); None for no target."""
-    md = Model(r, pat)
+def prefix_to(r, pat, T0, target, timeout_ms=0, nsub=1):
+    """Prefix of T0 lines from the start, a submission on line T0 (>= nsub submissions in total), ending
+    exactly in config `target` (decoded config list of (offset, active)); None for no target."""
+    span = max(abs(o) for o, a in target) if target is not None else None
+    md = Model(r, pat, span)
     start = md.fixed_start()
     pre = [md.config() for _ in range(T0)]
     prev = start
     M = None
+    Ss = []
     for t in range(T0):
         md.trans(prev, pre[t])
         M, S = md.tick(pre[t], M)
+        Ss.append(S)
         prev = pre[t]
     md.add([S])
+    atleast(md, Ss[:-1], nsub - 1)
     if target is not None:
         for e in range(6):
             pos, act = pre[-1][e]
@@ -436,6 +441,132 @@ def auto(r, pat, count, best, tmo, kmin=1, mmax=3, ctmo=None):
                 break
             if len(res) < cur:
                 bestprog = res
+            T0 -= 1
+    return bestprog
+
+
+def prog_configs(r, prog):
+    """Decoded config (offset in [-3r,3r), active) of every emitter after each line."""
+    m = 6 * r
+    pos = [0] * 6
+    act = [False] * 6
+    out = []
+    for l in prog:
+        for e, c in enumerate(l.split()):
+            if c == 'F':
+                pos[e] += 1
+            elif c == 'B':
+                pos[e] -= 1
+            elif c == 'T':
+                act[e] = not act[e]
+        out.append([(((pos[e] + 3 * r) % m) - 3 * r, act[e]) for e in range(6)])
+    return out
+
+
+def sub_ticks(r, pat, prog):
+    """0-based line indices at which a submission happens."""
+    lines = [l.split() for l in prog]
+    out = []
+    n = 0
+    for t in range(1, len(lines) + 1):
+        k = simulate(r, pat, lines[:t])
+        if k > n:
+            out.append(t - 1)
+            n = k
+    return out
+
+
+def anchored_cycle(r, pat, Z, K, m=1, timeout_ms=0):
+    """K-cycle whose last config is fixed to Z (decoded config); returns K lines (from Z back to Z) or
+    None / 'unknown'."""
+    span = max(abs(o) for o, a in Z)
+    md = Model(r, pat, span)
+    cs = [md.config() for _ in range(K)]
+    for e in range(6):
+        pos, act = cs[-1][e]
+        o, a = Z[e]
+        md.add([pos[md.offs.index(o)]])
+        md.add([act if a else -act])
+    for t in range(K):
+        md.trans(cs[t - 1], cs[t])
+    M = None
+    Ss = []
+    for t in range(K):
+        M, S = md.tick(cs[t], M)
+        Ss.append(S)
+    md.add([Ss[-1]])
+    atleast(md, Ss[:-1], m - 1)
+    res = z3sat.solve(md.nv, md.cl, timeout_ms)
+    if res is None or res == 'unknown':
+        return res
+    cfg = [md.decode(res, c) for c in cs]
+    return lines_between([cfg[-1]] + cfg)
+
+
+def anchor(r, pat, count, best, tmo, mmax=2, maxz=6):
+    """For each submission config Z of the current best program: shortest anchored (K,m) cycle through Z with
+    rate below the current program's; program = best up to Z's first submission + cycle repeated."""
+    B = len(best)
+    subs = sub_ticks(r, pat, best)
+    cfgs = prog_configs(r, best)
+    f = subs[0] + 1
+    g = (B - f) / (count - 1) if count > 1 else 0
+    log('B %d first %d rate %.2f subs %d' % (B, f, g, len(subs)))
+    if count == 1:
+        return None
+    seen = []
+    for s in subs[:-1]:
+        Z = cfgs[s]
+        key = tuple(Z)
+        if key in seen:
+            continue
+        seen.append(key)
+    bestprog = None
+    for zi, key in enumerate(seen[:maxz]):
+        Z = list(key)
+        s0 = next(s for s in subs if tuple(cfgs[s]) == key)
+        cur = len(bestprog) if bestprog else B
+        cands = sorted({(K / m, K, m) for m in range(1, mmax + 1) for K in range(1, int(g * m) + 1)
+                        if K / m < g - 1e-9}, key=lambda x: (x[0], x[1]))
+        # cheapest rate first; stop at the first SAT (lower rates were UNSAT/unknown)
+        for rate, K, m in cands:
+            est = s0 + 1 + rate * (count - 1 - (len([x for x in subs if x <= s0]) - 1))
+            if est >= cur + K:
+                continue
+            res = anchored_cycle(r, pat, Z, K, m, tmo)
+            log('Z%d (tick %d) K=%d m=%d: %s' % (zi, s0 + 1, K, m, 'UNSAT' if res is None else res
+                                                  if res == 'unknown' else 'SAT'))
+            if res is None or res == 'unknown':
+                continue
+            prog = truncate(r, pat, count, best[:s0 + 1] + res * ((count // m) + 2))
+            if prog and len(prog) < (len(bestprog) if bestprog else B):
+                bestprog = prog
+                log('  -> len %d' % len(prog))
+            break
+    return bestprog
+
+
+def prefix_opt(r, pat, count, best, tmo, jmax=3):
+    """Replace best[:s_j+1] (up to the j-th submission) by a shorter SAT prefix with >= j submissions that ends
+    in the same configuration; the rest of the program is kept."""
+    subs = sub_ticks(r, pat, best)
+    cfgs = prog_configs(r, best)
+    log('B %d subs %s' % (len(best), subs[:jmax]))
+    bestprog = None
+    for j in range(1, min(jmax, len(subs)) + 1):
+        s = subs[j - 1]
+        Z = cfgs[s]
+        T0 = s  # current prefix has s+1 lines
+        while T0 >= j:
+            res = prefix_to(r, pat, T0, Z, tmo, j)
+            log('prefix j=%d T0=%d (cur %d): %s' % (j, T0, s + 1, 'UNSAT' if res is None else res
+                                                     if res == 'unknown' else 'SAT'))
+            if res is None or res == 'unknown':
+                break
+            prog = truncate(r, pat, count, res + best[s + 1:])
+            if prog and len(prog) < (len(bestprog) if bestprog else len(best)):
+                bestprog = prog
+                log('  -> len %d' % len(prog))
             T0 -= 1
     return bestprog
 
@@ -529,13 +660,22 @@ def main():
     if mode in ('cycle', 'copy'):
         k = int(sys.argv[4])
         m = int(sys.argv[5]) if len(sys.argv) > 5 else 1
-        res = cycle_only(r, pat, k, m, free=(mode == 'copy'))
+        import os
+        res = cycle_only(r, pat, k, m, int(os.environ.get('SATTMO', '0')), free=(mode == 'copy'))
         if res is None:
             print('UNSAT')
         elif res == 'unknown':
             print('UNKNOWN')
         else:
             print('SAT')
+            print('\n'.join(res))
+    elif mode in ('anchor', 'prefix'):
+        best = [l for l in open(sys.argv[4]).read().splitlines() if l.strip()]
+        tmo = int(sys.argv[5]) if len(sys.argv) > 5 else 20000
+        res = (anchor if mode == 'anchor' else prefix_opt)(r, pat, count, best, tmo)
+        if res:
+            n = simulate(r, pat, [l.split() for l in res])
+            log('RESULT len %d sim %d/%d (best %d)' % (len(res), n, count, len(best)))
             print('\n'.join(res))
     elif mode == 'auto':
         # auto <bestfile(one program)> <timeout_ms>

@@ -1,5 +1,5 @@
 """Run satcyc.py auto over medium patterns (parallel JOBS, hard timeout per pattern), keep improvements.
-Usage: satdrive.py <input-name> <idx,idx,...|all> [z3 timeout ms]"""
+Usage: [SATMODE=auto|anchor] satdrive.py <input-name> <idx,idx,...|all> [z3 timeout ms] [cycle timeout ms]"""
 import os
 import sys
 import tempfile
@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from harness import HERE, LEVEL, cases, load_best, save_best, valid, run_job
 
 name, sel = sys.argv[1], sys.argv[2]
+MODE = os.environ.get('SATMODE', 'auto')
 tmo = sys.argv[3] if len(sys.argv) > 3 else '30000'
 ctmo = sys.argv[4] if len(sys.argv) > 4 else '8000'
 inp = LEVEL / 'data' / ('in_level-6_%s.txt' % name)
@@ -19,7 +20,7 @@ tmpd = tempfile.mkdtemp(prefix='satdrive_')
 def job(i):
     f = os.path.join(tmpd, 'b%d.txt' % i)
     open(f, 'w').write('\n'.join(best[i]) + '\n')
-    p = run_job(['python3', str(HERE / 'satcyc.py'), str(inp), str(i), 'auto', f, tmo, ctmo],
+    p = run_job(['python3', str(HERE / 'satcyc.py'), str(inp), str(i), MODE, f, tmo, ctmo],
                 capture_output=True, text=True)
     logd = os.environ.get('SATLOG')
     if logd:
@@ -32,7 +33,7 @@ saved = 0
 with ThreadPoolExecutor(int(os.environ.get('JOBS', '2'))) as ex:
     for i, prog, err in ex.map(job, idxs):
         r, pat, count = cs[i]
-        tail = [l for l in err.splitlines() if l.startswith(('B ', 'cycle', 'RESULT')) and 'unknown' not in l]
+        tail = [l for l in err.splitlines() if l.startswith(('B ', 'cycle', 'RESULT', '  ->')) and 'unknown' not in l]
         print('pattern %d: %s' % (i, ' | '.join(tail)), flush=True)
         if prog and valid(r, pat, count, prog):
             cur = load_best(name)[i]
