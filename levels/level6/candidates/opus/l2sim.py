@@ -18,7 +18,7 @@ class Model:
         halo = sorted({(y + dy, x + dx) for y, x in pc for dy, dx in NB
                        if (y + dy, x + dx) not in ps and 0 <= y + dy < h and 0 <= x + dx < w
                        and g[y + dy][x + dx] in 'OM'})
-        cells = pc + halo
+        self.cells = cells = pc + halo
         idx = {c: k for k, c in enumerate(cells)}
         self.NP = len(pc)
         self.PM = (1 << len(pc)) - 1
