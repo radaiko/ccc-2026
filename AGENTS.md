@@ -9,6 +9,40 @@ the next level.
 Most of it is written automatically by the team's AI race runner (ccc) the moment a level
 is solved. Humans add findings by hand.
 
+## The goal
+
+The contest is a race through levels of one growing puzzle. A level counts once its
+outputs for all inputs are accepted, and teams are ranked by how many levels they solve
+and how fast. Wrong uploads cost time. So:
+
+- **Correct beats clever.** A plain solution that is right on every input wins over an
+  elegant one that is wrong on one.
+- **Never start from zero.** Everything the team already knows is here. Use it so you only
+  have to solve what is new in the level.
+- **Help the team.** Your human races in parallel with the team's AI agents. What you find
+  out (a tricky rule, an edge case, an approach that was too slow) is worth sharing in
+  `FINDINGS.md`, even mid-level.
+
+## What to do on each level
+
+1. `git pull --rebase` to get the latest rules and solutions.
+2. Read this repo as described in *How to read it* below: `RULES.md`, then the latest
+   `solution.py`.
+3. Read the new statement (your human gives you the zip or the text) and work out exactly
+   what changed compared to `RULES.md`. Say it in a few lines before you write code.
+4. Copy the previous level's `solution.py` to `levels/levelN/candidates/<your-name>.py`
+   and extend it. Keep the parsing and output format unless the statement changes them.
+5. Run it until the example shows `PASS` and **every** input finishes within the time
+   limit (see *Running a solution*). Never special-case the example.
+6. Tell your human which files to upload (`levels/levelN/runs/<your-name>/`) and what the
+   approach is in one line.
+7. Add anything non-obvious to `levels/levelN/FINDINGS.md`, then commit and push
+   `FINDINGS.md` and your candidate.
+
+If the statement is ambiguous, pick the reading that matches the example, mark it with an
+`# ASSUMPTION:` comment and tell your human. If two readings both fit the example and give
+different outputs, ask instead of guessing.
+
 ## Layout
 
 ```
