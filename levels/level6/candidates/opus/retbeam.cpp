@@ -87,7 +87,7 @@ void build() {
 }
 
 double WH = 3.0, W1 = 1.0, W2 = 0.3, WL = 0.5, WR = 1.0;
-int K = 6, NC = 1, PERPID = 0, FREE = 0;
+int K = 6, NC = 1, PERPID = 0, FREE = 0, GOAL = 1;
 struct Pair {
     unsigned char spos[6], sact, tpos[6], tact;
 };
@@ -206,12 +206,47 @@ template <int NW> struct Solver {
     static int needE(const Pair& pr, int e, int pos, int act) {
         return ringdist(pos, pr.tpos[e]) + (((act >> e) & 1) != ((pr.tact >> e) & 1));
     }
+    // per pair: what the target configuration's own final tick does: T2 (made M), T3 (cleared)
+    vector<B> gT2, gT3;
+    vector<char> pairOk;
+    void initGoal() {
+        gT2.assign(pairs.size(), B());
+        gT3.assign(pairs.size(), B());
+        pairOk.assign(pairs.size(), 1);
+        for (size_t i = 0; i < pairs.size(); i++) {
+            B s0, s1, s2;
+            memset(s0.w, 0, sizeof s0.w);
+            memset(s1.w, 0, sizeof s1.w);
+            memset(s2.w, 0, sizeof s2.w);
+            for (int e = 0; e < 6; e++)
+                if (((pairs[i].tact >> e) & 1) && G.fires[e * RING + pairs[i].tpos[e]]) {
+                    const B& L = line[e * RING + pairs[i].tpos[e]];
+                    for (int k = 0; k < NW; k++) {
+                        s2.w[k] |= s1.w[k] & L.w[k];
+                        s1.w[k] |= s0.w[k] & L.w[k];
+                        s0.w[k] |= L.w[k];
+                    }
+                }
+            for (int k = 0; k < NW; k++) {
+                gT2[i].w[k] = s1.w[k] & ~s2.w[k];
+                gT3[i].w[k] = s2.w[k];
+                if ((gT3[i].w[k] & Pm.w[k]) || (gT2[i].w[k] & Hm.w[k])) pairOk[i] = 0;
+            }
+            if (!GOAL) {
+                memset(gT2[i].w, 0, sizeof gT2[i].w);
+                memset(gT3[i].w, 0, sizeof gT3[i].w);
+            }
+        }
+    }
     double evaluate(const Node& n, int retSum) {
         B miss;
-        for (int k = 0; k < NW; k++) miss.w[k] = Pm.w[k] & ~n.M.w[k];
+        bool last = n.copies + 1 == NC && !FREE;
+        const B& T2 = gT2[n.pid];
+        const B& T3 = gT3[n.pid];
+        for (int k = 0; k < NW; k++) miss.w[k] = Pm.w[k] & ~n.M.w[k] & ~(last ? T2.w[k] : 0);
         int pm = NP - pc(miss);
         B hb;
-        for (int k = 0; k < NW; k++) hb.w[k] = Hm.w[k] & n.M.w[k];
+        for (int k = 0; k < NW; k++) hb.w[k] = Hm.w[k] & n.M.w[k] & ~(last ? T3.w[k] : 0);
         int hm = pc(hb);
         B o1, t1, o2, t2;
         memset(o1.w, 0, sizeof o1.w);
@@ -245,8 +280,11 @@ template <int NW> struct Solver {
         rng.seed(seed);
         init();
         levels.clear();
+        initGoal();
         vector<Node> roots;
+        int nbad = 0;
         for (int i = 0; i < (int)pairs.size(); i++) {
+            if (!pairOk[i] && !FREE) { nbad++; continue; }
             Node root;
             memcpy(root.pos, pairs[i].spos, 6);
             root.act = pairs[i].sact;
@@ -258,6 +296,7 @@ template <int NW> struct Solver {
             root.score = 0;
             roots.push_back(root);
         }
+        if (nbad) fprintf(stderr, "%d of %d targets can never end a copy\n", nbad, (int)pairs.size());
         levels.push_back(roots);
         vector<Cand> cands;
         for (int depth = 0; depth < K; depth++) {
@@ -271,7 +310,9 @@ template <int NW> struct Solver {
                 const Pair& pr = pairs[par.pid];
                 {
                     B miss;
-                    for (int k = 0; k < NW; k++) miss.w[k] = Pm.w[k] & ~par.M.w[k];
+                    bool last = par.copies + 1 == NC && !FREE;
+                    for (int k = 0; k < NW; k++)
+                        miss.w[k] = Pm.w[k] & ~par.M.w[k] & ~(last ? gT2[par.pid].w[k] : 0);
                     if (pc(miss) == 0) miss = Pm;
                     computeLineDist(miss);
                 }
@@ -493,6 +534,7 @@ int main(int argc, char** argv) {
     if (argc > 12) WR = atof(argv[12]);
     if (getenv("PERPID")) PERPID = atoi(getenv("PERPID"));
     if (getenv("FREE")) FREE = atoi(getenv("FREE"));
+    if (getenv("GOAL")) GOAL = atoi(getenv("GOAL"));
     int n;
     in >> n;
     for (int t = 0; t <= idx; t++) {

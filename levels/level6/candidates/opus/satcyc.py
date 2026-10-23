@@ -257,7 +257,7 @@ def build_cycle(md, K, m=1, start=None):
     return cs, Ss
 
 
-def cycle_only(r, pat, K, m=1, timeout_ms=0, free=False):
+def cycle_only(r, pat, K, m=1, timeout_ms=0, free=False, want_cfg=False):
     md = Model(r, pat)
     st = md.config() if free else None
     cs, Ss = build_cycle(md, K, m, st)
@@ -266,6 +266,8 @@ def cycle_only(r, pat, K, m=1, timeout_ms=0, free=False):
         return res
     cfg = [md.decode(res, c) for c in cs]
     first = md.decode(res, st) if free else cfg[-1]
+    if want_cfg:
+        return cfg, [t for t in range(K) if Ss[t] in res]
     return lines_between([first] + cfg)
 
 
@@ -324,43 +326,68 @@ def prog_with_prefix(r, pat, count, K, m, T0, timeout_ms=0):
     return prog
 
 
+def prefix_to(r, pat, T0, target, timeout_ms=0):
+    """Prefix of T0 lines from the start, first submission on line T0, ending exactly in config `target`
+    (decoded config list of (offset, active)); None for no target."""
+    md = Model(r, pat)
+    start = md.fixed_start()
+    pre = [md.config() for _ in range(T0)]
+    prev = start
+    M = None
+    for t in range(T0):
+        md.trans(prev, pre[t])
+        M, S = md.tick(pre[t], M)
+        prev = pre[t]
+    md.add([S])
+    if target is not None:
+        for e in range(6):
+            pos, act = pre[-1][e]
+            o, a = target[e]
+            md.add([pos[md.offs.index(o)]])
+            md.add([act if a else -act])
+    res = z3sat.solve(md.nv, md.cl, timeout_ms)
+    if res is None or res == 'unknown':
+        return res
+    st = md.decode(res, start)
+    return lines_between([st] + [md.decode(res, c) for c in pre])
+
+
 def log(*a):
     print(*a, file=sys.stderr, flush=True)
 
 
-def auto(r, pat, count, best, tmo, kmin=1, mmax=3):
-    """Search a shorter program than `best` lines: lower bound per copy, (K,m) cycles, then prefixes."""
+def auto(r, pat, count, best, tmo, kmin=1, mmax=3, ctmo=None):
+    """Search a shorter program than `best` lines: (K,m) cycles with rate below the current one (cheapest
+    first, short timeout ctmo each; unknown = skip), then the shortest prefix that enters the cycle."""
     B = len(best)
+    ctmo = ctmo or tmo
     lines = [l.split() for l in best]
-    # current first submission tick and per-copy rate
     f = next(t for t in range(1, B + 1) if simulate(r, pat, lines[:t]) >= 1)
     g = (B - f) / (count - 1) if count > 1 else 0
     log('B %d first %d rate %.2f' % (B, f, g))
     kstar = kmin
     if count > 1:
+        # every copy needs > k ticks if no copy from any configuration takes exactly 1..k ticks
         while kstar < g:
-            res = cycle_only(r, pat, kstar, 1, tmo, free=True)
+            res = cycle_only(r, pat, kstar, 1, ctmo, free=True)
             log('copy %d: %s' % (kstar, 'UNSAT' if res is None else res if res == 'unknown' else 'SAT'))
             if res is not None:
                 break
             kstar += 1
-    # lower bound for the first copy
     flo = kstar
-    cands = []
-    if count > 1:
-        for m in range(1, mmax + 1):
-            for K in range(m * kstar, int(g * m) + 2):
-                cands.append((K / m, K, m))
-        cands.sort()
     bestprog = None
     if count == 1:
         cyc_opts = [(1, 1)]
     else:
+        cands = []
+        for m in range(1, mmax + 1):
+            for K in range(max(m * kstar, 1), int(g * m) + 2):
+                if K / m <= g + 1e-9:
+                    cands.append((K / m, K, m))
+        cands.sort()
         cyc_opts = []
         for rate, K, m in cands:
-            if flo + rate * (count - 1) - (K - 1) >= B:  # optimistic bound
-                continue
-            res = cycle_only(r, pat, K, m, tmo)
+            res = cycle_only(r, pat, K, m, ctmo)
             log('cycle K=%d m=%d: %s' % (K, m, 'UNSAT' if res is None else res if res == 'unknown' else 'SAT'))
             if res is not None and res != 'unknown':
                 cyc_opts.append((K, m))
@@ -384,6 +411,82 @@ def auto(r, pat, count, best, tmo, kmin=1, mmax=3):
     return bestprog
 
 
+def auto2(r, pat, count, best, tmo, ctmo, mmax=3, maxfail=2, joint=True):
+    """Cycles (K,m) with rate <= current, tried from the current rate downwards (stop after `maxfail`
+    consecutive failures); for the best cycles a shortest prefix into one of its submission configs."""
+    B = len(best)
+    lines = [l.split() for l in best]
+    f = next(t for t in range(1, B + 1) if simulate(r, pat, lines[:t]) >= 1)
+    g = (B - f) / (count - 1) if count > 1 else 0
+    log('B %d first %d rate %.2f' % (B, f, g))
+    bestprog = None
+
+    def consider(prog, tag):
+        nonlocal bestprog
+        if prog is None or prog == 'unknown':
+            return False
+        prog = truncate(r, pat, count, prog)
+        if prog is None:
+            log('  %s: program does not reach count' % tag)
+            return False
+        log('  %s: len %d' % (tag, len(prog)))
+        if len(prog) < (len(bestprog) if bestprog else B):
+            bestprog = prog
+        return True
+
+    if count == 1:
+        T0 = B - 1
+        while T0 >= 1:
+            res = prefix_to(r, pat, T0, None, tmo)
+            log('prefix T0=%d: %s' % (T0, 'UNSAT' if res is None else res if res == 'unknown' else 'SAT'))
+            if not consider(res, 'T0=%d' % T0):
+                break
+            T0 = len(bestprog) - 1
+        return bestprog
+    cands = sorted({(K / m, K, m) for m in range(1, mmax + 1) for K in range(1, int(g * m) + 1)
+                    if K / m <= g + 1e-9}, reverse=True)
+    found = []
+    fails = 0
+    for rate, K, m in cands:
+        if any(abs(rate - x[0]) < 1e-9 for x in found):
+            continue
+        res = cycle_only(r, pat, K, m, ctmo, want_cfg=True)
+        log('cycle K=%d m=%d: %s' % (K, m, 'UNSAT' if res is None else res if res == 'unknown' else 'SAT'))
+        if res is None or res == 'unknown':
+            fails += 1
+            if fails >= maxfail:
+                break
+            continue
+        fails = 0
+        found.append((rate, K, m, res))
+    found.sort()
+    for rate, K, m, (cfg, subs) in found[:2]:
+        cl = lines_between([cfg[-1]] + cfg)
+        reps = (count - 1) // m + 2
+        for j in subs:
+            # continuation after submission at cycle tick j
+            cont = (cl[j + 1:] + cl[:j + 1]) * reps
+            T0 = min(f + 1, B - 1)
+            while T0 >= 1:
+                res = prefix_to(r, pat, T0, cfg[j], tmo)
+                log('fixed cycle K=%d m=%d j=%d T0=%d: %s' % (K, m, j, T0, 'UNSAT' if res is None else res
+                                                               if res == 'unknown' else 'SAT'))
+                if res is None or res == 'unknown':
+                    break
+                consider(res + cont, 'K=%d m=%d j=%d T0=%d' % (K, m, j, T0))
+                T0 -= 1
+        if joint:
+            T0 = min(f, B - 1)
+            while T0 >= 1:
+                res = prog_with_prefix(r, pat, count, K, m, T0, tmo)
+                log('joint K=%d m=%d T0=%d: %s' % (K, m, T0, 'UNSAT' if res is None else res
+                                                   if res == 'unknown' else 'SAT'))
+                if not consider(res, 'joint K=%d m=%d T0=%d' % (K, m, T0)):
+                    break
+                T0 -= 1
+    return bestprog
+
+
 def main():
     inp, idx, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]
     r, pat, count = list(cases(open(inp).read()))[idx]
@@ -402,7 +505,8 @@ def main():
         # auto <bestfile(one program)> <timeout_ms>
         best = [l for l in open(sys.argv[4]).read().splitlines() if l.strip()]
         tmo = int(sys.argv[5]) if len(sys.argv) > 5 else 60000
-        res = auto(r, pat, count, best, tmo)
+        ctmo = int(sys.argv[6]) if len(sys.argv) > 6 else 10000
+        res = auto2(r, pat, count, best, tmo, ctmo)
         if res:
             n = simulate(r, pat, [l.split() for l in res])
             log('RESULT len %d sim %d/%d (best %d)' % (len(res), n, count, len(best)))

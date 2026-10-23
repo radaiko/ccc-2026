@@ -114,7 +114,7 @@ void build() {
         }
 }
 
-double WH = 3.0, W1 = 1.0, W2 = 0.3, WL = 0.0, WTM = 0.0, WTS = 0.0;
+double WH = 3.0, W1 = 1.0, W2 = 0.3, WL = 0.0, WTM = 0.0, WTS = 0.0, WTN = 0.0;
 int TAILN = 40;
 vector<string> forced;
 vector<string> prefixLines, prefixOut;  // compact ("FB-T--") and printable forms  // per tick: 6 chars, '?' = free, else the forced instruction
@@ -254,8 +254,8 @@ template <int NW> struct Solver {
         for (int e = 0; e < 6; e++) lg += lineDist[(e * RING + n.pos[e]) * 2 + ((n.act >> e) & 1)];
         double tail = 0;
         int nmiss = NP - pm;
-        if ((WTM > 0 || WTS > 0) && nmiss > 0 && nmiss <= TAILN) {
-            int mx = 0, sm = 0;
+        if ((WTM > 0 || WTS > 0 || WTN > 0) && nmiss > 0 && nmiss <= TAILN) {
+            int mx = 0, sm = 0, mn = 99;
             for (int k = 0; k < NW; k++) {
                 u64 w = miss.w[k];
                 while (w) {
@@ -270,10 +270,11 @@ template <int NW> struct Solver {
                         else if (d < a2) a2 = d;
                     }
                     mx = max(mx, a2);
+                    mn = min(mn, a2);
                     sm += a2;
                 }
             }
-            tail = WTM * mx + WTS * (double)sm / nmiss;
+            tail = WTM * mx + WTS * (double)sm / nmiss + WTN * mn;
         }
         double wd = 0;
         for (size_t q = 0; q < cls.size(); q++) {
@@ -460,6 +461,17 @@ template <int NW> struct Solver {
             }
             levels.push_back(std::move(next));
         }
+        if (getenv("DUMP") && !levels.back().empty()) {
+            vector<string> prog;
+            int idx = 0;
+            for (int d = (int)levels.size() - 1; d > 0; d--) {
+                prog.push_back(insStr(levels[d][idx].ins));
+                idx = levels[d][idx].parent;
+            }
+            reverse(prog.begin(), prog.end());
+            for (auto& l : prefixOut) fprintf(stderr, "%s\n", l.c_str());
+            for (auto& l : prog) fprintf(stderr, "%s\n", l.c_str());
+        }
         return {};
     }
 
@@ -544,6 +556,7 @@ int main(int argc, char** argv) {
     if (getenv("COPYW")) COPYW = atof(getenv("COPYW"));
     if (getenv("WTM")) WTM = atof(getenv("WTM"));
     if (getenv("WTS")) WTS = atof(getenv("WTS"));
+    if (getenv("WTN")) WTN = atof(getenv("WTN"));
     if (getenv("TAILN")) TAILN = atoi(getenv("TAILN"));
     if (argc > 10) {
         ifstream fs(argv[10]);

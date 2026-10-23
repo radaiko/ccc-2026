@@ -47,3 +47,7 @@
   <= ticks left). Anchors = submission configs of the current best. NC=1 cycles (K<=current per copy) are almost
   never found; NC=2/3 multi-copy cycles are: 167 156->126 (2 copies / 14 ticks), 197 75->71, 49 90->85, 132 64->63.
   Medium 5991 -> 5951. Use WH=100 (halo weight) in the beam weights.
+- [enormous agent] Weights 100 1 0.3 0.25 (lower line-distance weight WL) beat 100 1 0.3 0.5 on a 20-pattern width-100
+  sample (raw 866 vs 964); width-600 pass with them: enormous 5035 -> 4853, reversed copy 2 again -> 4841.
+- [enormous agent] beam_e.cpp env HFORBID=1: skip children that create halo matter from a clean parent and prune
+  subtrees where a 2-hit halo cell cannot get a 3rd hit from later emitters: 2-2.5x faster, same quality at WH=100.

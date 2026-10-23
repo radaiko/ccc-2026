@@ -87,7 +87,7 @@ void build() {
 
 double WH = 3.0, W1 = 1.0, W2 = 0.3, WL = 0.0, WTM = 0.0, WTS = 0.0;
 int TAILN = 40;
-int DBG = 0, HALOT = 0;
+int DBG = 0, HALOT = 0, HFORBID = 0;
 double WX1 = 0, WX2 = 0;
 vector<string> forced;
 vector<string> prefixLines, prefixOut;  // compact ("FB-T--") and printable forms  // per tick: 6 chars, '?' = free, else the forced instruction
@@ -296,6 +296,9 @@ template <int NW> struct Solver {
             unsigned short foundIns = 0;
             for (int pi = 0; pi < (int)cur.size() && found < 0; pi++) {
                 const Node& par = cur[pi];
+                bool parClean = true;
+                for (int k = 0; k < NW; k++)
+                    if (par.M.w[k] & Hm.w[k]) parClean = false;
                 {
                     B miss;
                     for (int k = 0; k < NW; k++) miss.w[k] = Pm.w[k] & ~par.M.w[k];
@@ -366,6 +369,7 @@ template <int NW> struct Solver {
                         if ((m & Pm.w[k]) != Pm.w[k]) full = false;
                         if (m & Hm.w[k]) clean = false;
                     }
+                    if (HFORBID && parClean && !clean) return;
                     if (full && clean) {
                         child.copies++;
                         for (int k = 0; k < NW; k++) child.M.w[k] &= ~Pm.w[k];
@@ -378,11 +382,28 @@ template <int NW> struct Solver {
                     double sc = evaluate(child) + (rng() & 1023) * 1e-4;
                     cands.push_back({sc, pi, ins});
                 };
-                for (choice[0] = 0; choice[0] < nopt[0]; choice[0]++) { stepLevel(0, choice[0]);
-                for (choice[1] = 0; choice[1] < nopt[1]; choice[1]++) { stepLevel(1, choice[1]);
-                for (choice[2] = 0; choice[2] < nopt[2]; choice[2]++) { stepLevel(2, choice[2]);
-                for (choice[3] = 0; choice[3] < nopt[3]; choice[3]++) { stepLevel(3, choice[3]);
-                for (choice[4] = 0; choice[4] < nopt[4]; choice[4]++) { stepLevel(4, choice[4]);
+                // suf[e]: cells any of emitters e..5 can still hit this tick
+                B suf[7];
+                memset(suf[6].w, 0, sizeof suf[6].w);
+                for (int e = 5; e >= 0; e--) {
+                    suf[e] = suf[e + 1];
+                    for (int o = 0; o < nopt[e]; o++)
+                        if (oact[e][o] && G.fires[e * RING + opos[e][o]])
+                            for (int k = 0; k < NW; k++) suf[e].w[k] |= line[e * RING + opos[e][o]].w[k];
+                }
+                bool prune = HFORBID && parClean;
+                // a halo cell with exactly two hits that no later emitter can reach stays matter
+                auto bad = [&](int e) {
+                    if (!prune) return false;
+                    for (int k = 0; k < NW; k++)
+                        if (s1[e + 1].w[k] & ~s2[e + 1].w[k] & Hm.w[k] & ~suf[e + 1].w[k]) return true;
+                    return false;
+                };
+                for (choice[0] = 0; choice[0] < nopt[0]; choice[0]++) { stepLevel(0, choice[0]); if (bad(0)) continue;
+                for (choice[1] = 0; choice[1] < nopt[1]; choice[1]++) { stepLevel(1, choice[1]); if (bad(1)) continue;
+                for (choice[2] = 0; choice[2] < nopt[2]; choice[2]++) { stepLevel(2, choice[2]); if (bad(2)) continue;
+                for (choice[3] = 0; choice[3] < nopt[3]; choice[3]++) { stepLevel(3, choice[3]); if (bad(3)) continue;
+                for (choice[4] = 0; choice[4] < nopt[4]; choice[4]++) { stepLevel(4, choice[4]); if (bad(4)) continue;
                 for (choice[5] = 0; choice[5] < nopt[5]; choice[5]++) { stepLevel(5, choice[5]);
                     leaf();
                 }}}}}}
@@ -509,6 +530,7 @@ int main(int argc, char** argv) {
     if (getenv("HALOT")) HALOT = atoi(getenv("HALOT"));
     if (getenv("WX1")) WX1 = atof(getenv("WX1"));
     if (getenv("WX2")) WX2 = atof(getenv("WX2"));
+    if (getenv("HFORBID")) HFORBID = atoi(getenv("HFORBID"));
     if (getenv("DBG")) DBG = atoi(getenv("DBG"));
     if (getenv("TAILN")) TAILN = atoi(getenv("TAILN"));
     if (argc > 10) {
