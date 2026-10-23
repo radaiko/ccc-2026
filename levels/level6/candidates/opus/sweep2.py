@@ -42,7 +42,7 @@ def main():
                              capture_output=True, text=True).stdout.split('\n')
         return i, out[0], [l for l in res if l.strip() and l != 'NONE']
 
-    with ThreadPoolExecutor(os.cpu_count()) as ex:
+    with ThreadPoolExecutor(int(os.environ.get('JOBS', os.cpu_count()))) as ex:
         for i, head, prog in ex.map(job, jobs):
             r, pat, count = cs[i]
             print('pattern %d: %s -> %d (best %d)' % (i, head, len(prog), len(best[i])), flush=True)

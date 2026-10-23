@@ -89,7 +89,7 @@ def main():
                              capture_output=True, text=True).stdout.split('\n')
         return i, [l for l in out if l.strip() and l != 'NONE']
 
-    with ThreadPoolExecutor(os.cpu_count()) as ex:
+    with ThreadPoolExecutor(int(os.environ.get('JOBS', os.cpu_count()))) as ex:
         for i, prog in ex.map(job, jobs):
             r, pat, count = cs[i]
             if prog and len(prog) < len(best[i]) and valid(r, pat, count, prog):

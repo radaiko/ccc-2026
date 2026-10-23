@@ -9,6 +9,6 @@ def job(a):
     i, s = a
     out = subprocess.run([str(HERE / 'beam'), str(inp), str(i), width, '1'] + s, capture_output=True, text=True).stdout
     return len([l for l in out.split('\n') if l.strip()])
-with ThreadPoolExecutor(os.cpu_count()) as ex:
+with ThreadPoolExecutor(int(os.environ.get('JOBS', os.cpu_count()))) as ex:
     for s in settings:
         print(s, sum(ex.map(job, [(i, s) for i in idxs])), flush=True)

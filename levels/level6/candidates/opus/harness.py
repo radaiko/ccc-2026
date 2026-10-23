@@ -92,7 +92,7 @@ def main():
         return i, prog
 
     improved = 0
-    with ThreadPoolExecutor(os.cpu_count()) as ex:
+    with ThreadPoolExecutor(int(os.environ.get('JOBS', os.cpu_count()))) as ex:
         for i, prog in ex.map(job, idxs):
             r, pat, count = cs[i]
             if not prog:

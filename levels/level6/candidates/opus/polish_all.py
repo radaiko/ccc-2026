@@ -21,7 +21,7 @@ def job(i):
     return i, [l for l in out.split('\n') if l.strip()]
 
 
-with ThreadPoolExecutor(os.cpu_count()) as ex:
+with ThreadPoolExecutor(int(os.environ.get('JOBS', os.cpu_count()))) as ex:
     for i, prog in ex.map(job, range(len(cs))):
         r, pat, count = cs[i]
         if prog and prog != ['INVALID'] and len(prog) < len(best[i]) and valid(r, pat, count, prog):
