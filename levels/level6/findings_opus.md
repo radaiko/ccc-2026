@@ -172,3 +172,6 @@ Result of this playbook so far: 21,797 -> 15,583 (medium 5804, large 4946, enorm
 - [large agent] Enormous, shortest programs first (11-36 lines): resuf_e.py + beam_e4 (HFORBID=1, w 100,1,0.3,0.25, width 2000). Cuts d4..d14,s0 seed 1: 4650 -> 4553. Then cut t1 (a complete re-beam) with seeds 2,3 gave another -36 (4549 -> 4513). On short programs a full re-beam with new seeds is the most productive move. Programs of 33-41 lines gained little (-4), the enormous agent had already covered them.
 - Exhaustive 2-tick copy search (cyc2) does not scale to large: every r=6..8 pattern (even |P| <= 15) timed out at
   45 s, so use the SAT tools (satcyc/satscan) there instead.
+- [medium-cycles agent] `opus/satscan2.py`: anchor-neighbourhood SAT (4 emitters of a base anchor fixed, 2 or 3
+  emitters fully free, ~1-12 s/query): all UNSAT for 50 (10,2) 2- and 3-free, 35 (9,2), 119 (8,2), 144 (9,2),
+  80 (7,2) around every submission config of the bests -> those rates look locally optimal.
