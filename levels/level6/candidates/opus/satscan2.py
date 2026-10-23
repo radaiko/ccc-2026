@@ -13,6 +13,7 @@ from satanchor import anchored
 
 name, i, m, K, deadline = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]), float(sys.argv[5])
 tmo = int(sys.argv[6]) if len(sys.argv) > 6 else 10000
+nfree = int(sys.argv[7]) if len(sys.argv) > 7 else 2
 inp = LEVEL / 'data' / ('in_level-6_%s.txt' % name)
 r, pat, count = list(cases(inp.read_text()))[i]
 prog = load_best(name)[i]
@@ -24,7 +25,7 @@ for t, pos, am in subs[:count - 1]:
 weights = '100,1,0.3,0.5,1'.split(',')
 nq = 0
 for base in bases:
-    for fe in itertools.combinations(range(6), 2):
+    for fe in itertools.combinations(range(6), nfree):
         if time.time() > deadline:
             print('deadline, queries', nq, flush=True)
             sys.exit(0)
